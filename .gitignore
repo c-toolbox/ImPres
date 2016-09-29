@@ -1,0 +1,18 @@
+*~
+*.swp
+.DS_Store
+.vscode
+/bin/
+/build/
+/cache/
+Thumbs.db
+tmp/
+
+/ext/sgct
+
+# CMake stuff
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+install_manifest.txt

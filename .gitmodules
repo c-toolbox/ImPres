@@ -1,0 +1,3 @@
+[submodule "ext/sgct"]
+	path = ext/sgct
+	url = https://github.com/opensgct/sgct.git

@@ -5,6 +5,9 @@
 #include <sgct.h>
 #include "Capture.hpp"
 
+#include <imgui.h>
+#include <imgui_impl_glfw_gl3.h>
+
 sgct::Engine * gEngine;
 Capture * gCapture = NULL;
 
@@ -18,6 +21,9 @@ void myEncodeFun();
 void myDecodeFun();
 void myCleanUpFun();
 void myKeyCallback(int key, int action);
+void myCharCallback(unsigned int c);
+void myMouseButtonCallback(int button, int action);
+void myMouseScrollCallback(double xoffset, double yoffset);
 void myContextCreationCallback(GLFWwindow * win);
 
 sgct_utils::SGCTPlane * plane = NULL;
@@ -92,8 +98,11 @@ sgct::SharedBool renderDome(fulldomeMode);
 sgct::SharedDouble captureRate(0.0);
 sgct::SharedInt32 domeCut(2);
 sgct::SharedBool chromaKey(false);
-sgct::SharedInt32 chromaKeyColorIdx(0);
-std::vector<glm::vec3> chromaKeyColors;
+sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
+
+//ImGUI variables
+bool imChromaKey = false;
+ImVec4 imChromaKeyColor = ImColor(0, 177, 64);
 
 int main( int argc, char* argv[] )
 {
@@ -128,6 +137,9 @@ int main( int argc, char* argv[] )
     gEngine->setPostSyncPreDrawFunction(myPostSyncPreDrawFun);
     gEngine->setCleanUpFunction( myCleanUpFun );
     gEngine->setKeyboardCallbackFunction(myKeyCallback);
+	gEngine->setCharCallbackFunction(myCharCallback);
+	gEngine->setMouseButtonCallbackFunction(myMouseButtonCallback);
+	gEngine->setMouseScrollCallbackFunction(myMouseScrollCallback);
     gEngine->setContextCreationCallback(myContextCreationCallback);
     gEngine->setDropCallbackFunction(myDropCallback);
 
@@ -163,6 +175,10 @@ int main( int argc, char* argv[] )
         loadThread->join();
         delete loadThread;
     }
+
+	// Clean up
+	if (gEngine->isMaster())
+		ImGui_ImplGlfwGL3_Shutdown();
 
     // Clean up
     delete gCapture;
@@ -205,9 +221,9 @@ void myDraw3DFun()
     {
         sgct::ShaderManager::instance()->bindShaderProgram("chromakey");
         glUniform3f(ChromaKeyColor_Loc_CK
-            , chromaKeyColors[chromaKeyColorIdx.getVal()].r
-            , chromaKeyColors[chromaKeyColorIdx.getVal()].g
-            , chromaKeyColors[chromaKeyColorIdx.getVal()].b);
+            , chromaKeyColor.getVal().r
+            , chromaKeyColor.getVal().g
+            , chromaKeyColor.getVal().b);
         ScaleUV_L = ScaleUV_Loc_CK;
         OffsetUV_L = OffsetUV_Loc_CK;
         Matrix_L = Matrix_Loc_CK;
@@ -283,6 +299,19 @@ void myDraw2DFun()
             gCapture->getHeight(),
             captureRate.getVal());
     }
+
+	if (gEngine->isMaster())
+	{
+		ImGui_ImplGlfwGL3_NewFrame();
+
+		ImGui::SetNextWindowSize(ImVec2(400, 100), ImGuiSetCond_FirstUseEver);
+		ImGui::Begin("Settings");
+		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
+		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
+		ImGui::End();
+
+		ImGui::Render();
+	}
 }
 
 void myPreSyncFun()
@@ -337,12 +366,6 @@ void myInitOGLFun()
     std::function<void(uint8_t ** data, int width, int height)> callback = uploadData;
     gCapture->setVideoDecoderCallback(callback);
 
-    //chroma key color
-    chromaKeyColors.push_back(glm::vec3(0.0, 0.0, 0.0));
-    chromaKeyColors.push_back(glm::vec3(0.0, 1.0, 0.0));
-    chromaKeyColors.push_back(glm::vec3(0.0, 0.0, 1.0));
-    chromaKeyColors.push_back(glm::vec3(0.0, 177.0 / 255.0, 64.0 / 255.0));
-
     //create plane
     float planeWidth = 8.0f;
     float planeHeight = planeWidth * (static_cast<float>(gCapture->getHeight()) / static_cast<float>(gCapture->getWidth()));
@@ -380,6 +403,10 @@ void myInitOGLFun()
 
     sgct::ShaderManager::instance()->unBindShaderProgram();
 
+	// Setup ImGui binding
+	if (gEngine->isMaster())
+		ImGui_ImplGlfwGL3_Init(gEngine->getCurrentWindowPtr()->getWindowHandle());
+
     sgct::Engine::checkForOGLErrors();
 }
 
@@ -394,8 +421,10 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeBool(&takeScreenshot);
     sgct::SharedData::instance()->writeBool(&renderDome);
     sgct::SharedData::instance()->writeInt32(&domeCut);
+	chromaKey.setVal(imChromaKey);
     sgct::SharedData::instance()->writeBool(&chromaKey);
-    sgct::SharedData::instance()->writeInt32(&chromaKeyColorIdx);
+	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
+    sgct::SharedData::instance()->writeObj(&chromaKeyColor);
 }
 
 void myDecodeFun()
@@ -410,7 +439,11 @@ void myDecodeFun()
     sgct::SharedData::instance()->readBool(&renderDome);
     sgct::SharedData::instance()->readInt32(&domeCut);
     sgct::SharedData::instance()->readBool(&chromaKey);
-    sgct::SharedData::instance()->readInt32(&chromaKeyColorIdx);
+	imChromaKey = chromaKey.getVal();
+    sgct::SharedData::instance()->readObj(&chromaKeyColor);
+	imChromaKeyColor.x = chromaKeyColor.getVal().x;
+	imChromaKeyColor.y = chromaKeyColor.getVal().y;
+	imChromaKeyColor.z = chromaKeyColor.getVal().z;
 }
 
 void myCleanUpFun()
@@ -447,83 +480,91 @@ void myKeyCallback(int key, int action)
 {
     if (gEngine->isMaster())
     {
-        switch (key)
-        {
-        case SGCT_KEY_C:
-            if (action == SGCT_PRESS)
-                chromaKey.toggle();
-            break;
-        case SGCT_KEY_D:
-            if (action == SGCT_PRESS)
-                renderDome.setVal(true);
-            break;
-        case SGCT_KEY_S:
-            if (action == SGCT_PRESS)
-                stats.toggle();
-            break;
+		switch (key)
+		{
+		case SGCT_KEY_D:
+			if (action == SGCT_PRESS)
+				renderDome.setVal(true);
+			break;
+		case SGCT_KEY_S:
+			if (action == SGCT_PRESS)
+				stats.toggle();
+			break;
 
-        case SGCT_KEY_I:
-            if (action == SGCT_PRESS)
-                info.toggle();
-            break;
-                
-        case SGCT_KEY_W:
-            if (action == SGCT_PRESS)
-                wireframe.toggle();
-            break;
+		case SGCT_KEY_I:
+			if (action == SGCT_PRESS)
+				info.toggle();
+			break;
 
-        case SGCT_KEY_F:
-            if (action == SGCT_PRESS)
-                wireframe.toggle();
-            break;
+		case SGCT_KEY_W:
+			if (action == SGCT_PRESS)
+				wireframe.toggle();
+			break;
 
-        case SGCT_KEY_1:
-            if (action == SGCT_PRESS)
-                domeCut.setVal(1);
-            break;
+		case SGCT_KEY_F:
+			if (action == SGCT_PRESS)
+				wireframe.toggle();
+			break;
 
-        case SGCT_KEY_2:
-            if (action == SGCT_PRESS)
-                domeCut.setVal(2);
-            break;
+		case SGCT_KEY_1:
+			if (action == SGCT_PRESS)
+				domeCut.setVal(1);
+			break;
 
-            //plane mode
-        case SGCT_KEY_P:
-            if (action == SGCT_PRESS)
-                renderDome.setVal(false);
-            break;
+		case SGCT_KEY_2:
+			if (action == SGCT_PRESS)
+				domeCut.setVal(2);
+			break;
 
-        case SGCT_KEY_LEFT:
-            if (action == SGCT_PRESS && numSyncedTex.getVal() > 0)
-            {
-                texIndex.getVal() > incrIndex.getVal() - 1 ? texIndex -= incrIndex.getVal() : texIndex.setVal(numSyncedTex.getVal() - 1);
-                //fprintf(stderr, "Index set to: %d\n", texIndex.getVal());
-            }
-            break;
+			//plane mode
+		case SGCT_KEY_P:
+			if (action == SGCT_PRESS)
+				renderDome.setVal(false);
+			break;
 
-        case SGCT_KEY_RIGHT:
-            if (action == SGCT_PRESS && numSyncedTex.getVal() > 0)
-            {
-                texIndex.setVal((texIndex.getVal() + incrIndex.getVal()) % numSyncedTex.getVal());
-                //fprintf(stderr, "Index set to: %d\n", texIndex.getVal());
-            }
-            break;
+		case SGCT_KEY_LEFT:
+			if (action == SGCT_PRESS && numSyncedTex.getVal() > 0)
+			{
+				texIndex.getVal() > incrIndex.getVal() - 1 ? texIndex -= incrIndex.getVal() : texIndex.setVal(numSyncedTex.getVal() - 1);
+				//fprintf(stderr, "Index set to: %d\n", texIndex.getVal());
+			}
+			break;
 
-        case SGCT_KEY_UP:
-            if (action == SGCT_PRESS && chromaKeyColorIdx.getVal() < chromaKeyColors.size())
-            {
-                chromaKeyColorIdx.setVal(chromaKeyColorIdx.getVal() + 1);
-            }
-            break;
+		case SGCT_KEY_RIGHT:
+			if (action == SGCT_PRESS && numSyncedTex.getVal() > 0)
+			{
+				texIndex.setVal((texIndex.getVal() + incrIndex.getVal()) % numSyncedTex.getVal());
+				//fprintf(stderr, "Index set to: %d\n", texIndex.getVal());
+			}
+			break;
+		}
 
-        case SGCT_KEY_DOWN:
-            if (action == SGCT_PRESS && chromaKeyColorIdx.getVal() > 0)
-            {
-                chromaKeyColorIdx.setVal(chromaKeyColorIdx.getVal() - 1);
-            }
-            break;
-        }
+		ImGui_ImplGlfwGL3_KeyCallback(gEngine->getCurrentWindowPtr()->getWindowHandle(), key, 0, action, 0);
     }
+}
+
+void myCharCallback(unsigned int c)
+{
+	if (gEngine->isMaster())
+	{
+		ImGui_ImplGlfwGL3_CharCallback(gEngine->getCurrentWindowPtr()->getWindowHandle(), c);
+	}
+}
+
+void myMouseButtonCallback(int button, int action)
+{
+	if (gEngine->isMaster())
+	{
+		ImGui_ImplGlfwGL3_MouseButtonCallback(gEngine->getCurrentWindowPtr()->getWindowHandle(), button, action, 0);
+	}
+}
+
+void myMouseScrollCallback(double xoffset, double yoffset)
+{
+	if (gEngine->isMaster())
+	{
+		ImGui_ImplGlfwGL3_ScrollCallback(gEngine->getCurrentWindowPtr()->getWindowHandle(), xoffset, yoffset);
+	}
 }
 
 void myContextCreationCallback(GLFWwindow * win)

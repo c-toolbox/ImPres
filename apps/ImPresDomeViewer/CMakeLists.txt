@@ -42,10 +42,53 @@ set_property (TARGET ${TARGET} PROPERTY XCODE_ATTRIBUTE_${XCODE_PROPERTY}
 	    ${XCODE_VALUE})
 endmacro (set_xcode_property)
 
+if(NOT IMGUI_INCLUDE_DIRECTORY)
+    if( WIN32 )
+        find_path(IMGUI_INCLUDE_DIRECTORY
+            NAMES imgui.h
+            PATHS ${SGCT_BASE_DIRECTORY}/additional_includes/imgui NO_DEFAULT_PATH
+            REQUIRED)
+    else()
+        find_path(IMGUI_INCLUDE_DIRECTORY
+            NAMES imgui.h
+            PATH_SUFFIXES imgui
+            PATHS ${SGCT_BASE_DIRECTORY}/additional_includes/imgui
+            REQUIRED)
+    endif()
+endif()
+
 add_executable(${APP_NAME}
 	main.cpp
 	Capture.cpp
-	Capture.hpp)	
+	Capture.hpp
+	${IMGUI_INCLUDE_DIRECTORY}/imconfig.h
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui.h
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui_internal.h
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui.cpp
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui_demo.cpp
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui_draw.cpp
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.h
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.cpp)
+
+#copy data
+file(GLOB files
+	"${PROJECT_SOURCE_DIR}/*.png"
+	"${PROJECT_SOURCE_DIR}/*.jpg"
+	"${PROJECT_SOURCE_DIR}/*.xml"
+	"${PROJECT_SOURCE_DIR}/*.vert*"
+	"${PROJECT_SOURCE_DIR}/*.frag*")
+file(COPY ${files} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+if(WIN32)
+	file(GLOB scripts "${PROJECT_SOURCE_DIR}/*.bat")
+	file(COPY ${scripts} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+	file(COPY ${scripts} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/Release)
+	file(COPY ${scripts} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/Debug)
+	file(COPY ${files} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/Release)
+	file(COPY ${files} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/Debug)
+elseif(UNIX)
+	file(GLOB scripts "${PROJECT_SOURCE_DIR}/*.command")
+	file(COPY ${scripts} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+endif()
 	
 if(APPLE)
 	option(SGCT_CPP11 "Use libc++ instead of libstdc++" ON)
@@ -91,7 +134,7 @@ set(FFMPEG_INCLUDES
 	${FFMPEG_LIBSWSCALE_INCLUDE_DIRS}
 	${FFMPEG_LIBAVRESAMPLE_INCLUDE_DIRS})
 
-include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES})
+include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${IMGUI_INCLUDE_DIRECTORY})
 
 set(FFMPEG_LIBS
 	${FFMPEG_LIBAVCODEC_LIBRARIES}

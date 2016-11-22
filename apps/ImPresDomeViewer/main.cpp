@@ -76,6 +76,8 @@ void parseArguments(int& argc, char**& argv);
 void allocateTexture();
 void captureLoop(void *arg);
 void calculateStats();
+void startCapture();
+void stopCapture();
 
 GLint Matrix_Loc = -1;
 GLint ScaleUV_Loc = -1;
@@ -89,9 +91,6 @@ GLuint texId = GL_FALSE;
 tthread::thread * captureThread;
 bool flipFrame = false;
 bool fulldomeMode = false;
-float planeAzimuth = 0.0f;
-float planeElevation = 33.0f;
-float planeRoll = 0.0f;
 
 sgct::SharedBool captureRunning(true);
 sgct::SharedBool renderDome(fulldomeMode);
@@ -99,10 +98,18 @@ sgct::SharedDouble captureRate(0.0);
 sgct::SharedInt32 domeCut(2);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
+sgct::SharedFloat planeAzimuth(0.0f);
+sgct::SharedFloat planeElevation(33.0f);
+sgct::SharedFloat planeRoll(0.0f);
+sgct::SharedFloat planeDistance(-5.0f);
 
 //ImGUI variables
 bool imChromaKey = false;
 ImVec4 imChromaKeyColor = ImColor(0, 177, 64);
+float imPlaneAzimuth = 0.0f;
+float imPlaneElevation = 33.0f;
+float imPlaneRoll = 0.0f;
+float imPlaneDistance = -5.0f;
 
 int main( int argc, char* argv[] )
 {
@@ -161,13 +168,7 @@ int main( int argc, char* argv[] )
     // Main loop
     gEngine->render();
 
-    //kill capture thread
-    captureRunning.setVal(false);
-    if (captureThread)
-    {
-        captureThread->join();
-        delete captureThread;
-    }
+	stopCapture();
 
     running.setVal(false);
     if (loadThread)
@@ -266,10 +267,10 @@ void myDraw3DFun()
 
         //transform and draw plane
         glm::mat4 planeTransform = glm::mat4(1.0f);
-        planeTransform = glm::rotate(planeTransform, glm::radians(planeAzimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-        planeTransform = glm::rotate(planeTransform, glm::radians(planeElevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-        planeTransform = glm::rotate(planeTransform, glm::radians(planeRoll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-        planeTransform = glm::translate(planeTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+        planeTransform = glm::rotate(planeTransform, glm::radians(planeAzimuth.getVal()), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+        planeTransform = glm::rotate(planeTransform, glm::radians(planeElevation.getVal()), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+        planeTransform = glm::rotate(planeTransform, glm::radians(planeRoll.getVal()), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+        planeTransform = glm::translate(planeTransform, glm::vec3(0.0f, 0.0f, planeDistance.getVal())); //distance
 
         planeTransform = MVP * planeTransform;
         glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &planeTransform[0][0]);
@@ -304,10 +305,14 @@ void myDraw2DFun()
 	{
 		ImGui_ImplGlfwGL3_NewFrame();
 
-		ImGui::SetNextWindowSize(ImVec2(400, 100), ImGuiSetCond_FirstUseEver);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Settings");
 		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
 		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
+		ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
+		ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
+		ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
+		//ImGui::SliderFloat("Plane Distance", &imPlaneDistance, -50.f, 0.0f);
 		ImGui::End();
 
 		ImGui::Render();
@@ -349,6 +354,27 @@ void myPostSyncPreDrawFun()
     fulldomeMode = renderDome.getVal(); //set the flag frame synchronized for all viewports
 }
 
+void startCapture()
+{
+	//start capture thread if host or load thread if master and not host
+	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
+	if (thisNode->getAddress() == gCapture->getVideoHost()) {
+		captureRunning.setVal(true);
+		captureThread = new (std::nothrow) tthread::thread(captureLoop, NULL);
+	}
+}
+
+void stopCapture()
+{
+	//kill capture thread
+	captureRunning.setVal(false);
+	if (captureThread)
+	{
+		captureThread->join();
+		delete captureThread;
+	}
+}
+
 void myInitOGLFun()
 {
     gCapture->init();
@@ -356,11 +382,11 @@ void myInitOGLFun()
     //allocate texture
     allocateTexture();
 
-    //start capture thread if host or load thread if master and not host
-    sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
-    if (thisNode->getAddress() == gCapture->getVideoHost())
-        captureThread = new (std::nothrow) tthread::thread(captureLoop, NULL);
-    else if (gEngine->isMaster())
+    //start capture
+	startCapture();
+
+	//start load thread
+    if (gEngine->isMaster())
         loadThread = new (std::nothrow) tthread::thread(threadWorker, NULL);
 
     std::function<void(uint8_t ** data, int width, int height)> callback = uploadData;
@@ -425,6 +451,14 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeBool(&chromaKey);
 	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
     sgct::SharedData::instance()->writeObj(&chromaKeyColor);
+	planeAzimuth.setVal(imPlaneAzimuth);
+	sgct::SharedData::instance()->writeFloat(&planeAzimuth);
+	planeElevation.setVal(imPlaneElevation);
+	sgct::SharedData::instance()->writeFloat(&planeElevation);
+	planeRoll.setVal(imPlaneRoll);
+	sgct::SharedData::instance()->writeFloat(&planeRoll);
+	planeDistance.setVal(imPlaneDistance);
+	sgct::SharedData::instance()->writeFloat(&planeDistance);
 }
 
 void myDecodeFun()
@@ -444,6 +478,14 @@ void myDecodeFun()
 	imChromaKeyColor.x = chromaKeyColor.getVal().x;
 	imChromaKeyColor.y = chromaKeyColor.getVal().y;
 	imChromaKeyColor.z = chromaKeyColor.getVal().z;
+	sgct::SharedData::instance()->readFloat(&planeAzimuth);
+	imPlaneAzimuth = planeAzimuth.getVal();
+	sgct::SharedData::instance()->readFloat(&planeElevation);
+	imPlaneElevation = planeElevation.getVal();
+	sgct::SharedData::instance()->readFloat(&planeRoll);
+	imPlaneRoll = planeRoll.getVal();
+	sgct::SharedData::instance()->readFloat(&planeDistance);
+	imPlaneDistance = planeDistance.getVal();
 }
 
 void myCleanUpFun()
@@ -588,10 +630,19 @@ void myDataTransferDecoder(void * receivedData, int receivedlength, int packageI
     sgct::MessageHandler::instance()->print("Decoding %d bytes in transfer id: %d on node %d\n", receivedlength, packageId, clientIndex);
 
     lastPackage.setVal(packageId);
+
+	//stop capture
+	bool captureStarted = captureRunning.getVal();
+	if (captureStarted)
+		stopCapture();
     
     //read the image on slave
     readImage( reinterpret_cast<unsigned char*>(receivedData), receivedlength);
     uploadTexture();
+
+	//start capture
+	if (captureStarted)
+		startCapture();
 }
 
 void myDataTransferStatus(bool connected, int clientIndex)
@@ -972,39 +1023,42 @@ void captureLoop(void *arg)
     int dataSize = gCapture->getWidth() * gCapture->getHeight() * 3;
     GLuint PBO;
     glGenBuffers(1, &PBO);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
+
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
+	glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
 
     while (captureRunning.getVal())
     {
-        gCapture->poll();
-        //sgct::Engine::sleep(0.02); //take a short break to offload the cpu
+		gCapture->poll();
+		sgct::Engine::sleep(0.02); //take a short break to offload the cpu
 
-        if (gEngine->isMaster() && transfer.getVal() && !serverUploadDone.getVal() && !clientsUploadDone.getVal())
-        {
-            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+		// We are not sending the capture to the nodes.
+		/*if (gEngine->isMaster() && transfer.getVal() && !serverUploadDone.getVal() && !clientsUploadDone.getVal())
+		{
+			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-            startDataTransfer();
-            transfer.setVal(false);
+			startDataTransfer();
+			transfer.setVal(false);
 
-            //load textures on master
-            uploadTexture();
-            serverUploadDone = true;
+			//load textures on master
+			uploadTexture();
+			serverUploadDone = true;
 
-            if (sgct_core::ClusterManager::instance()->getNumberOfNodes() == 1) //no cluster
-            {
-                clientsUploadDone = true;
-            }
+			if (sgct_core::ClusterManager::instance()->getNumberOfNodes() == 1) //no cluster
+			{
+			clientsUploadDone = true;
+			}
 
-            sgct::Engine::sleep(0.1); //ten iteration per second
+			sgct::Engine::sleep(0.1); //ten iteration per second
 
-            //restore for capture
-            glfwMakeContextCurrent(hiddenWindow);
-            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
-        }
+			//restore for capture
+			glfwMakeContextCurrent(hiddenWindow);
+			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
+		}*/
     }
 
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
     glDeleteBuffers(1, &PBO);
 
     glfwMakeContextCurrent(NULL); //detach context

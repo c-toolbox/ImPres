@@ -27,6 +27,7 @@ void myMouseScrollCallback(double xoffset, double yoffset);
 void myContextCreationCallback(GLFWwindow * win);
 
 sgct_utils::SGCTPlane * plane = NULL;
+
 sgct_utils::SGCTDome * dome = NULL;
 
 GLFWwindow * hiddenWindow;
@@ -78,6 +79,7 @@ void captureLoop(void *arg);
 void calculateStats();
 void startCapture();
 void stopCapture();
+void createPlane();
 
 GLint Matrix_Loc = -1;
 GLint ScaleUV_Loc = -1;
@@ -91,6 +93,9 @@ GLuint texId = GL_FALSE;
 tthread::thread * captureThread;
 bool flipFrame = false;
 bool fulldomeMode = false;
+bool recreatePlane = false;
+glm::vec2 planeScaling(1.0f, 1.0f);
+glm::vec2 planeOffset(0.0f, 0.0f);
 
 sgct::SharedBool captureRunning(true);
 sgct::SharedBool renderDome(fulldomeMode);
@@ -98,6 +103,10 @@ sgct::SharedDouble captureRate(0.0);
 sgct::SharedInt32 domeCut(2);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
+sgct::SharedInt planeScreenAspect(1610);
+sgct::SharedInt planeMaterialAspect(169);
+sgct::SharedBool planeUseCaptureSize(false);
+sgct::SharedFloat planeWidth(8.0f);
 sgct::SharedFloat planeAzimuth(0.0f);
 sgct::SharedFloat planeElevation(33.0f);
 sgct::SharedFloat planeRoll(0.0f);
@@ -106,6 +115,10 @@ sgct::SharedFloat planeDistance(-5.0f);
 //ImGUI variables
 bool imChromaKey = false;
 ImVec4 imChromaKeyColor = ImColor(0, 177, 64);
+int imPlaneScreenAspect = 1610;
+int imPlaneMaterialAspect = 169;
+bool imPlaneUseCaptureSize = false;
+float imPlaneWidth = 8.0f;
 float imPlaneAzimuth = 0.0f;
 float imPlaneElevation = 33.0f;
 float imPlaneRoll = 0.0f;
@@ -191,6 +204,9 @@ int main( int argc, char* argv[] )
 
 void myDraw3DFun()
 {
+	if (recreatePlane)
+		createPlane();
+
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
@@ -260,8 +276,8 @@ void myDraw3DFun()
     }
     else //plane mode
     {
-        glUniform2f(ScaleUV_L, 1.f, 1.f);
-        glUniform2f(OffsetUV_L, 0.f, 0.f);
+		glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
+		glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
 
         glCullFace(GL_BACK);
 
@@ -274,7 +290,8 @@ void myDraw3DFun()
 
         planeTransform = MVP * planeTransform;
         glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &planeTransform[0][0]);
-        plane->draw();
+
+		plane->draw();
     }
 
     sgct::ShaderManager::instance()->unBindShaderProgram();
@@ -307,11 +324,25 @@ void myDraw2DFun()
 
 		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Settings");
-		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
-		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
+		if (!imPlaneUseCaptureSize) {
+			ImGui::RadioButton("16:10", &imPlaneScreenAspect, 1610); ImGui::SameLine();
+			ImGui::RadioButton("16:9", &imPlaneScreenAspect, 169); ImGui::SameLine();
+			ImGui::RadioButton("5:4", &imPlaneScreenAspect, 54); ImGui::SameLine();
+			ImGui::RadioButton("4:3", &imPlaneScreenAspect, 43); ImGui::SameLine();
+			ImGui::Text("  -  Screen Aspect Ratio");
+			ImGui::RadioButton("16;10", &imPlaneMaterialAspect, 1610); ImGui::SameLine();
+			ImGui::RadioButton("16;9", &imPlaneMaterialAspect, 169); ImGui::SameLine();
+			ImGui::RadioButton("5;4", &imPlaneMaterialAspect, 54); ImGui::SameLine();
+			ImGui::RadioButton("4;3", &imPlaneMaterialAspect, 43); ImGui::SameLine();
+			ImGui::Text("  -  Material Aspect Ratio");
+		}
+		ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
+		ImGui::SliderFloat("Plane Width", &imPlaneWidth, 2.0f, 12.0f);
 		ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
 		ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
 		ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
+		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
+		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
 		//ImGui::SliderFloat("Plane Distance", &imPlaneDistance, -50.f, 0.0f);
 		ImGui::End();
 
@@ -375,6 +406,156 @@ void stopCapture()
 	}
 }
 
+void createPlane() {
+	if (plane != NULL)
+		delete plane;
+
+	float planeHeight = planeWidth.getVal() * (static_cast<float>(gCapture->getHeight()) / static_cast<float>(gCapture->getWidth()));
+	if (planeUseCaptureSize.getVal())
+	{
+		plane = new sgct_utils::SGCTPlane(planeWidth.getVal(), planeHeight);
+	}
+	else
+	{
+		switch (planeMaterialAspect.getVal())
+		{
+		case 1610:
+			plane = new sgct_utils::SGCTPlane(planeWidth.getVal(), (planeWidth.getVal() / 16.0f) * 10.0f);
+			break;
+		case 169:
+			plane = new sgct_utils::SGCTPlane(planeWidth.getVal(), (planeWidth.getVal() / 16.0f) * 9.0f);
+			break;
+		case 54:
+			plane = new sgct_utils::SGCTPlane(planeWidth.getVal(), (planeWidth.getVal() / 5.0f) * 4.0f);
+			break;
+		case 43:
+			plane = new sgct_utils::SGCTPlane(planeWidth.getVal(), (planeWidth.getVal() / 4.0f) * 3.0f);
+			break;
+		default:
+			plane = new sgct_utils::SGCTPlane(planeWidth.getVal(), planeHeight);
+			break;
+		}
+	}
+
+	if (planeUseCaptureSize.getVal())
+	{
+		planeScaling = glm::vec2(1.0f, 1.0f);
+		planeOffset = glm::vec2(0.0f, 0.0f);
+	}
+	else
+	{
+		switch (planeScreenAspect.getVal())
+		{
+		case 1610:
+			switch (planeMaterialAspect.getVal())
+			{
+			case 169:
+				//16:10 -> 16:9
+				planeScaling = glm::vec2(1.0f, 0.95f);
+				planeOffset = glm::vec2(0.0f, 0.05f);
+				break;
+			case 54:
+				//16:10 -> 5:4
+				planeScaling = glm::vec2(10.0f / 12.0f, 1.0f);
+				planeOffset = glm::vec2(1.0f / 12.0f, 0.0f);
+				break;
+			case 43:
+				//16:10 -> 4:3
+				planeScaling = glm::vec2(50.0f / 64.0f, 1.0f);
+				planeOffset = glm::vec2(7.0f / 64.0f, 0.0f);
+				break;
+			case 1610:
+			default:
+				planeScaling = glm::vec2(1.0f, 1.0f);
+				planeOffset = glm::vec2(0.0f, 0.0f);
+				break;
+			}
+			break;
+		case 169:
+			switch (planeMaterialAspect.getVal())
+			{
+			case 1610:
+				//16:9 -> 16:10
+				planeScaling = glm::vec2(0.90f, 1.0f);
+				planeOffset = glm::vec2(0.05f, 0.0f);
+				break;
+			case 54:
+				//16:9 -> 5:4
+				planeScaling = glm::vec2(1.0f, 270.0f / 384.0f);
+				planeOffset = glm::vec2(0.0f, 57.0f / 384.0f);
+				break;
+			case 43:
+				//16:9 -> 4:3
+				planeScaling = glm::vec2(1.0f, 0.75f);
+				planeOffset = glm::vec2(0.0f, 0.125f);
+				break;
+			case 169:
+			default:
+				planeScaling = glm::vec2(1.0f, 1.0f);
+				planeOffset = glm::vec2(0.0f, 0.0f);
+				break;
+			}
+			break;
+		case 54:
+			switch (planeMaterialAspect.getVal())
+			{
+			case 1610:
+				//5:4 -> 16:10
+				planeScaling = glm::vec2(10.0f / 12.0f, 1.0f);
+				planeOffset = glm::vec2(1.0f / 12.0f, 0.0f);
+				break;
+			case 169:
+				//5:4 -> 16:9
+				planeScaling = glm::vec2(270.0f / 384.0f, 1.0f);
+				planeOffset = glm::vec2(57.0f / 384.0f, 0.0f);
+				break;
+			case 43:
+				//5:4 -> 4:3
+				planeScaling = glm::vec2(1.0f, 0.9375f);
+				planeOffset = glm::vec2(0.0f, 0.03125f);
+				break;
+			case 54:
+			default:
+				planeScaling = glm::vec2(1.0f, 1.0f);
+				planeOffset = glm::vec2(0.0f, 0.0f);
+				break;
+			}
+			break;
+		case 43:
+			switch (planeMaterialAspect.getVal())
+			{
+			case 1610:
+				//4:3 -> 16:10
+				planeScaling = glm::vec2(1.0f, 50.0f / 64.0f);
+				planeOffset = glm::vec2(0.0f, 7.0f / 64.0f);
+				break;
+			case 169:
+				//4:3 -> 16:9
+				planeScaling = glm::vec2(1.0f, 0.75f);
+				planeOffset = glm::vec2(0.0f, 0.125f);
+				break;
+			case 54:
+				//4:3 -> 5:4
+				planeScaling = glm::vec2(0.9375f, 1.0f);
+				planeOffset = glm::vec2(0.03125f, 0.0f);
+				break;
+			case 43:
+			default:
+				planeScaling = glm::vec2(1.0f, 1.0f);
+				planeOffset = glm::vec2(0.0f, 0.0f);
+				break;
+			}
+			break;
+		default:
+			planeScaling = glm::vec2(1.0f, 1.0f);
+			planeOffset = glm::vec2(0.0f, 0.0f);
+			break;
+		}
+	}
+
+	recreatePlane = false;
+}
+
 void myInitOGLFun()
 {
     gCapture->init();
@@ -393,9 +574,7 @@ void myInitOGLFun()
     gCapture->setVideoDecoderCallback(callback);
 
     //create plane
-    float planeWidth = 8.0f;
-    float planeHeight = planeWidth * (static_cast<float>(gCapture->getHeight()) / static_cast<float>(gCapture->getWidth()));
-    plane = new sgct_utils::SGCTPlane(planeWidth, planeHeight);
+	createPlane();
 
     //create dome
     dome = new sgct_utils::SGCTDome(7.4f, 180.0f, 256, 128);
@@ -451,6 +630,20 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeBool(&chromaKey);
 	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
     sgct::SharedData::instance()->writeObj(&chromaKeyColor);
+
+	if (planeScreenAspect.getVal() != imPlaneScreenAspect) recreatePlane = true;
+	planeScreenAspect.setVal(imPlaneScreenAspect);
+	sgct::SharedData::instance()->writeInt32(&planeScreenAspect);
+	if (planeMaterialAspect.getVal() != imPlaneMaterialAspect) recreatePlane = true;
+	planeMaterialAspect.setVal(imPlaneMaterialAspect);
+	sgct::SharedData::instance()->writeInt32(&planeMaterialAspect);
+	if (planeUseCaptureSize.getVal() != imPlaneUseCaptureSize) recreatePlane = true;
+	planeUseCaptureSize.setVal(imPlaneUseCaptureSize);
+	sgct::SharedData::instance()->writeBool(&planeUseCaptureSize);
+	if (planeWidth.getVal() != imPlaneWidth) recreatePlane = true;
+	planeWidth.setVal(imPlaneWidth);
+	sgct::SharedData::instance()->writeFloat(&planeWidth);
+
 	planeAzimuth.setVal(imPlaneAzimuth);
 	sgct::SharedData::instance()->writeFloat(&planeAzimuth);
 	planeElevation.setVal(imPlaneElevation);
@@ -478,6 +671,20 @@ void myDecodeFun()
 	imChromaKeyColor.x = chromaKeyColor.getVal().x;
 	imChromaKeyColor.y = chromaKeyColor.getVal().y;
 	imChromaKeyColor.z = chromaKeyColor.getVal().z;
+
+	sgct::SharedData::instance()->readInt32(&planeScreenAspect);
+	if (planeScreenAspect.getVal() != imPlaneScreenAspect) recreatePlane = true;
+	imPlaneScreenAspect = planeScreenAspect.getVal();
+	sgct::SharedData::instance()->readInt32(&planeMaterialAspect);
+	if (planeMaterialAspect.getVal() != imPlaneMaterialAspect) recreatePlane = true;
+	imPlaneMaterialAspect = planeMaterialAspect.getVal();
+	sgct::SharedData::instance()->readBool(&planeUseCaptureSize);
+	if (planeUseCaptureSize.getVal() != imPlaneUseCaptureSize) recreatePlane = true;
+	imPlaneUseCaptureSize = planeUseCaptureSize.getVal();
+	sgct::SharedData::instance()->readFloat(&planeWidth);
+	if (planeWidth.getVal() != imPlaneWidth) recreatePlane = true;
+	imPlaneWidth = planeWidth.getVal();
+
 	sgct::SharedData::instance()->readFloat(&planeAzimuth);
 	imPlaneAzimuth = planeAzimuth.getVal();
 	sgct::SharedData::instance()->readFloat(&planeElevation);

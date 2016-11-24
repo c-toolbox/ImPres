@@ -4,9 +4,10 @@ uniform sampler2D Tex;
 uniform vec2 scaleUV;
 uniform vec2 offsetUV;
 
-uniform float thresholdSensitivity;
-uniform float smoothing;
 uniform vec3 chromaKeyColor;
+uniform float chromaKeyCutOff;
+uniform float chromaKeyThresholdSensitivity;
+uniform float chromaKeySmoothing;
 
 in vec2 UV;
 out vec4 color;
@@ -23,8 +24,8 @@ void main()
     float Cr = 0.7132 * (texColor.r - Y);
     float Cb = 0.5647 * (texColor.b - Y);
      
-    float blendValue = smoothstep(thresholdSensitivity, thresholdSensitivity + smoothing, distance(vec2(Cr, Cb), vec2(maskCr, maskCb)));
-    if(blendValue > 0.1)
+    float blendValue = smoothstep(chromaKeyThresholdSensitivity, chromaKeyThresholdSensitivity + chromaKeySmoothing, distance(vec2(Cr, Cb), vec2(maskCr, maskCb)));
+    if(blendValue > chromaKeyCutOff)
         color = vec4(texColor.rgb, texColor.a * blendValue);
     else
         discard;

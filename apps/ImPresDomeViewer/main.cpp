@@ -88,6 +88,9 @@ GLint Matrix_Loc_CK = -1;
 GLint ScaleUV_Loc_CK = -1;
 GLint OffsetUV_Loc_CK = -1;
 GLint ChromaKeyColor_Loc_CK = -1;
+GLint ChromaKeyCutOff_Loc_CK = -1;
+GLint ChromaKeySensitivity_Loc_CK = -1;
+GLint ChromaKeySmoothing_Loc_CK = -1;
 GLuint texId = GL_FALSE;
 
 tthread::thread * captureThread;
@@ -101,8 +104,6 @@ sgct::SharedBool captureRunning(true);
 sgct::SharedBool renderDome(fulldomeMode);
 sgct::SharedDouble captureRate(0.0);
 sgct::SharedInt32 domeCut(2);
-sgct::SharedBool chromaKey(false);
-sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
 sgct::SharedInt planeScreenAspect(1610);
 sgct::SharedInt planeMaterialAspect(169);
 sgct::SharedBool planeUseCaptureSize(false);
@@ -111,10 +112,13 @@ sgct::SharedFloat planeAzimuth(0.0f);
 sgct::SharedFloat planeElevation(33.0f);
 sgct::SharedFloat planeRoll(0.0f);
 sgct::SharedFloat planeDistance(-5.0f);
+sgct::SharedBool chromaKey(false);
+sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
+sgct::SharedFloat chromaKeyCutOff(0.1f);
+sgct::SharedFloat chromaKeySensitivity(0.0f);
+sgct::SharedFloat chromaKeySmoothing(0.0f);
 
 //ImGUI variables
-bool imChromaKey = false;
-ImVec4 imChromaKeyColor = ImColor(0, 177, 64);
 int imPlaneScreenAspect = 1610;
 int imPlaneMaterialAspect = 169;
 bool imPlaneUseCaptureSize = false;
@@ -123,6 +127,11 @@ float imPlaneAzimuth = 0.0f;
 float imPlaneElevation = 33.0f;
 float imPlaneRoll = 0.0f;
 float imPlaneDistance = -5.0f;
+bool imChromaKey = false;
+ImVec4 imChromaKeyColor = ImColor(0, 219, 0);
+float imChromaKeyCutOff = 0.1f;
+float imChromaKeySensitivity = 0.0f;
+float imChromaKeySmoothing = 0.0f;
 
 int main( int argc, char* argv[] )
 {
@@ -241,6 +250,9 @@ void myDraw3DFun()
             , chromaKeyColor.getVal().r
             , chromaKeyColor.getVal().g
             , chromaKeyColor.getVal().b);
+		glUniform1f(ChromaKeyCutOff_Loc_CK, chromaKeyCutOff.getVal());
+		glUniform1f(ChromaKeySensitivity_Loc_CK, chromaKeySensitivity.getVal());
+		glUniform1f(ChromaKeySmoothing_Loc_CK, chromaKeySmoothing.getVal());
         ScaleUV_L = ScaleUV_Loc_CK;
         OffsetUV_L = OffsetUV_Loc_CK;
         Matrix_L = Matrix_Loc_CK;
@@ -343,6 +355,9 @@ void myDraw2DFun()
 		ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
 		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
 		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
+		ImGui::SliderFloat("Chroma Key CutOff", &imChromaKeyCutOff, 0.f, 0.5f);
+		ImGui::SliderFloat("Chroma Key Sensitivity", &imChromaKeySensitivity, 0.f, 0.05f);
+		ImGui::SliderFloat("Chroma Key Smoothing", &imChromaKeySmoothing, 0.f, 0.05f);
 		//ImGui::SliderFloat("Plane Distance", &imPlaneDistance, -50.f, 0.0f);
 		ImGui::End();
 
@@ -451,7 +466,7 @@ void createPlane() {
 			{
 			case 169:
 				//16:10 -> 16:9
-				planeScaling = glm::vec2(1.0f, 0.95f);
+				planeScaling = glm::vec2(1.0f, 0.90f);
 				planeOffset = glm::vec2(0.0f, 0.05f);
 				break;
 			case 54:
@@ -603,6 +618,9 @@ void myInitOGLFun()
     ScaleUV_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("scaleUV");
     OffsetUV_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("offsetUV");
     ChromaKeyColor_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyColor");
+	ChromaKeyCutOff_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyCutOff");
+	ChromaKeySensitivity_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyThresholdSensitivity");
+	ChromaKeySmoothing_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeySmoothing");
     GLint Tex_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("Tex");
     glUniform1i(Tex_Loc_CK, 0);
 
@@ -626,10 +644,6 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeBool(&takeScreenshot);
     sgct::SharedData::instance()->writeBool(&renderDome);
     sgct::SharedData::instance()->writeInt32(&domeCut);
-	chromaKey.setVal(imChromaKey);
-    sgct::SharedData::instance()->writeBool(&chromaKey);
-	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
-    sgct::SharedData::instance()->writeObj(&chromaKeyColor);
 
 	if (planeScreenAspect.getVal() != imPlaneScreenAspect) recreatePlane = true;
 	planeScreenAspect.setVal(imPlaneScreenAspect);
@@ -652,6 +666,17 @@ void myEncodeFun()
 	sgct::SharedData::instance()->writeFloat(&planeRoll);
 	planeDistance.setVal(imPlaneDistance);
 	sgct::SharedData::instance()->writeFloat(&planeDistance);
+
+	chromaKey.setVal(imChromaKey);
+	sgct::SharedData::instance()->writeBool(&chromaKey);
+	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
+	sgct::SharedData::instance()->writeObj(&chromaKeyColor);
+	chromaKeyCutOff.setVal(imChromaKeyCutOff);
+	sgct::SharedData::instance()->writeFloat(&chromaKeyCutOff);
+	chromaKeySensitivity.setVal(imChromaKeySensitivity);
+	sgct::SharedData::instance()->writeFloat(&chromaKeySensitivity);
+	chromaKeySmoothing.setVal(imChromaKeySmoothing);
+	sgct::SharedData::instance()->writeFloat(&chromaKeySmoothing);
 }
 
 void myDecodeFun()
@@ -665,12 +690,6 @@ void myDecodeFun()
     sgct::SharedData::instance()->readBool(&takeScreenshot);
     sgct::SharedData::instance()->readBool(&renderDome);
     sgct::SharedData::instance()->readInt32(&domeCut);
-    sgct::SharedData::instance()->readBool(&chromaKey);
-	imChromaKey = chromaKey.getVal();
-    sgct::SharedData::instance()->readObj(&chromaKeyColor);
-	imChromaKeyColor.x = chromaKeyColor.getVal().x;
-	imChromaKeyColor.y = chromaKeyColor.getVal().y;
-	imChromaKeyColor.z = chromaKeyColor.getVal().z;
 
 	sgct::SharedData::instance()->readInt32(&planeScreenAspect);
 	if (planeScreenAspect.getVal() != imPlaneScreenAspect) recreatePlane = true;
@@ -693,6 +712,20 @@ void myDecodeFun()
 	imPlaneRoll = planeRoll.getVal();
 	sgct::SharedData::instance()->readFloat(&planeDistance);
 	imPlaneDistance = planeDistance.getVal();
+
+	sgct::SharedData::instance()->readBool(&chromaKey);
+	imChromaKey = chromaKey.getVal();
+	sgct::SharedData::instance()->readObj(&chromaKeyColor);
+	imChromaKeyColor.x = chromaKeyColor.getVal().x;
+	imChromaKeyColor.y = chromaKeyColor.getVal().y;
+	imChromaKeyColor.z = chromaKeyColor.getVal().z;
+	sgct::SharedData::instance()->readFloat(&chromaKeyCutOff);
+	imChromaKeyCutOff = chromaKeyCutOff.getVal();
+	sgct::SharedData::instance()->readFloat(&chromaKeySensitivity);
+	imChromaKeySensitivity = chromaKeySensitivity.getVal();
+	sgct::SharedData::instance()->readFloat(&chromaKeySmoothing);
+	imChromaKeySmoothing = chromaKeySmoothing.getVal();
+	
 }
 
 void myCleanUpFun()

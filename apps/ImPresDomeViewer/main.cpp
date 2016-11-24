@@ -112,6 +112,8 @@ sgct::SharedFloat planeAzimuth(0.0f);
 sgct::SharedFloat planeElevation(33.0f);
 sgct::SharedFloat planeRoll(0.0f);
 sgct::SharedFloat planeDistance(-5.0f);
+sgct::SharedBool planeShow(true);
+sgct::SharedFloat fadingTime(2.0f);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
 sgct::SharedFloat chromaKeyCutOff(0.1f);
@@ -127,6 +129,8 @@ float imPlaneAzimuth = 0.0f;
 float imPlaneElevation = 33.0f;
 float imPlaneRoll = 0.0f;
 float imPlaneDistance = -5.0f;
+bool imPlaneShow = true;
+float imFadingTime = 2.0f;
 bool imChromaKey = false;
 ImVec4 imChromaKeyColor = ImColor(0, 219, 0);
 float imChromaKeyCutOff = 0.1f;
@@ -269,42 +273,44 @@ void myDraw3DFun()
 
     glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
 
-    if (fulldomeMode)
-    {
-        // TextureCut 2 equals showing only the middle square of a capturing a widescreen input
-        if (domeCut.getVal() == 2){
-            glUniform2f(ScaleUV_L, texSize.y / texSize.x, 1.f);
-            glUniform2f(OffsetUV_L, ((texSize.x - texSize.y)*0.5f) / texSize.x, 0.f);
-        }
-        else{
-            glUniform2f(ScaleUV_L, 1.f, 1.f);
-            glUniform2f(OffsetUV_L, 0.f, 0.f);
-        }
+	if (planeShow.getVal()) {
+		if (fulldomeMode)
+		{
+			// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
+			if (domeCut.getVal() == 2) {
+				glUniform2f(ScaleUV_L, texSize.y / texSize.x, 1.f);
+				glUniform2f(OffsetUV_L, ((texSize.x - texSize.y)*0.5f) / texSize.x, 0.f);
+			}
+			else {
+				glUniform2f(ScaleUV_L, 1.f, 1.f);
+				glUniform2f(OffsetUV_L, 0.f, 0.f);
+			}
 
-        glCullFace(GL_FRONT); //camera on the inside of the dome
+			glCullFace(GL_FRONT); //camera on the inside of the dome
 
-        glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &MVP[0][0]);
-        dome->draw();
-    }
-    else //plane mode
-    {
-		glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
-		glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
+			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &MVP[0][0]);
+			dome->draw();
+		}
+		else //plane mode
+		{
+			glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
+			glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
 
-        glCullFace(GL_BACK);
+			glCullFace(GL_BACK);
 
-        //transform and draw plane
-        glm::mat4 planeTransform = glm::mat4(1.0f);
-        planeTransform = glm::rotate(planeTransform, glm::radians(planeAzimuth.getVal()), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-        planeTransform = glm::rotate(planeTransform, glm::radians(planeElevation.getVal()), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-        planeTransform = glm::rotate(planeTransform, glm::radians(planeRoll.getVal()), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-        planeTransform = glm::translate(planeTransform, glm::vec3(0.0f, 0.0f, planeDistance.getVal())); //distance
+			//transform and draw plane
+			glm::mat4 planeTransform = glm::mat4(1.0f);
+			planeTransform = glm::rotate(planeTransform, glm::radians(planeAzimuth.getVal()), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+			planeTransform = glm::rotate(planeTransform, glm::radians(planeElevation.getVal()), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+			planeTransform = glm::rotate(planeTransform, glm::radians(planeRoll.getVal()), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+			planeTransform = glm::translate(planeTransform, glm::vec3(0.0f, 0.0f, planeDistance.getVal())); //distance
 
-        planeTransform = MVP * planeTransform;
-        glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &planeTransform[0][0]);
+			planeTransform = MVP * planeTransform;
+			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &planeTransform[0][0]);
 
-		plane->draw();
-    }
+			plane->draw();
+		}
+	}
 
     sgct::ShaderManager::instance()->unBindShaderProgram();
 

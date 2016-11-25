@@ -27,7 +27,6 @@ void myMouseScrollCallback(double xoffset, double yoffset);
 void myContextCreationCallback(GLFWwindow * win);
 
 sgct_utils::SGCTPlane * plane = NULL;
-
 sgct_utils::SGCTDome * dome = NULL;
 
 GLFWwindow * hiddenWindow;
@@ -355,10 +354,12 @@ void myDraw2DFun()
 			ImGui::Text("  -  Material Aspect Ratio");
 		}
 		ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
-		ImGui::SliderFloat("Plane Width", &imPlaneWidth, 2.0f, 12.0f);
-		ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
-		ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
-		ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
+		ImGui::SliderFloat("Capture Width", &imPlaneWidth, 2.0f, 12.0f);
+		ImGui::SliderFloat("Capture Azimuth", &imPlaneAzimuth, -180.f, 180.f);
+		ImGui::SliderFloat("Capture Elevation", &imPlaneElevation, -180.f, 180.f);
+		ImGui::SliderFloat("Capture Roll", &imPlaneRoll, -180.f, 180.f);
+		ImGui::Checkbox("Show Capture", &imPlaneShow);
+		ImGui::SliderFloat("Fading Time", &imFadingTime, 0.f, 5.0f);
 		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
 		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
 		ImGui::SliderFloat("Chroma Key CutOff", &imChromaKeyCutOff, 0.f, 0.5f);
@@ -673,6 +674,11 @@ void myEncodeFun()
 	planeDistance.setVal(imPlaneDistance);
 	sgct::SharedData::instance()->writeFloat(&planeDistance);
 
+	planeShow.setVal(imPlaneShow);
+	sgct::SharedData::instance()->writeBool(&planeShow);
+	fadingTime.setVal(imFadingTime);
+	sgct::SharedData::instance()->writeFloat(&fadingTime);
+
 	chromaKey.setVal(imChromaKey);
 	sgct::SharedData::instance()->writeBool(&chromaKey);
 	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
@@ -718,6 +724,11 @@ void myDecodeFun()
 	imPlaneRoll = planeRoll.getVal();
 	sgct::SharedData::instance()->readFloat(&planeDistance);
 	imPlaneDistance = planeDistance.getVal();
+
+	sgct::SharedData::instance()->readBool(&planeShow);
+	imPlaneShow = planeShow.getVal();
+	sgct::SharedData::instance()->readFloat(&fadingTime);
+	imFadingTime = fadingTime.getVal();
 
 	sgct::SharedData::instance()->readBool(&chromaKey);
 	imChromaKey = chromaKey.getVal();
@@ -921,6 +932,11 @@ void threadWorker(void *arg)
         //runs only on master
         if (transfer.getVal() && !serverUploadDone.getVal() && !clientsUploadDone.getVal())
         {
+			//stop capture
+			bool captureStarted = captureRunning.getVal();
+			if (captureStarted)
+				stopCapture();
+
             startDataTransfer();
             transfer.setVal(false);
             
@@ -932,6 +948,10 @@ void threadWorker(void *arg)
             {
                 clientsUploadDone = true;
             }
+
+			//start capture
+			if (captureStarted)
+				startCapture();
         }
 
         sgct::Engine::sleep(0.1); //ten iteration per second
@@ -1212,8 +1232,6 @@ void allocateTexture()
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, w, h);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1277,30 +1295,6 @@ void captureLoop(void *arg)
     {
 		gCapture->poll();
 		sgct::Engine::sleep(0.02); //take a short break to offload the cpu
-
-		// We are not sending the capture to the nodes.
-		/*if (gEngine->isMaster() && transfer.getVal() && !serverUploadDone.getVal() && !clientsUploadDone.getVal())
-		{
-			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-			startDataTransfer();
-			transfer.setVal(false);
-
-			//load textures on master
-			uploadTexture();
-			serverUploadDone = true;
-
-			if (sgct_core::ClusterManager::instance()->getNumberOfNodes() == 1) //no cluster
-			{
-			clientsUploadDone = true;
-			}
-
-			sgct::Engine::sleep(0.1); //ten iteration per second
-
-			//restore for capture
-			glfwMakeContextCurrent(hiddenWindow);
-			glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
-		}*/
     }
 
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);

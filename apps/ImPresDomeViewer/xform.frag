@@ -10,5 +10,6 @@ out vec4 color;
 
 void main()
 {
-    color = texture(Tex, (UV.st * scaleUV) + offsetUV) * opacity;
+    color = texture(Tex, (UV.st * scaleUV) + offsetUV);
+	color.a *= opacity;
 }

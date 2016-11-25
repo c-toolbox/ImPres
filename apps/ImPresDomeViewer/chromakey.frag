@@ -27,7 +27,7 @@ void main()
      
     float blendValue = smoothstep(chromaKeyThresholdSensitivity, chromaKeyThresholdSensitivity + chromaKeySmoothing, distance(vec2(Cr, Cb), vec2(maskCr, maskCb)));
     if(blendValue > chromaKeyCutOff){
-        color = texColor * blendValue * opacity;
+        color = vec4(texColor.rgb, texColor.a * blendValue * opacity);
 	}
     else
         discard;

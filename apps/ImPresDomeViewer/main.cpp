@@ -38,6 +38,7 @@ sgct::SharedBool info(false);
 sgct::SharedBool stats(false);
 sgct::SharedBool takeScreenshot(false);
 sgct::SharedBool wireframe(false);
+sgct::SharedFloat fadingTime(2.0f);
 
 //DomeImageViewer
 void myDropCallback(int count, const char** paths);
@@ -56,6 +57,8 @@ std::vector<sgct_core::Image *> transImages;
 sgct::SharedInt32 texIndex(-1);
 sgct::SharedInt32 incrIndex(1);
 sgct::SharedInt32 numSyncedTex(0);
+int previousTexIndex = -1;
+double domeBlendStartTime = -1.0;
 
 sgct::SharedBool running(true);
 sgct::SharedInt32 lastPackage(-1);
@@ -83,9 +86,15 @@ void createPlane();
 GLint Matrix_Loc = -1;
 GLint ScaleUV_Loc = -1;
 GLint OffsetUV_Loc = -1;
+GLint Opacity_Loc = -1;
+GLint Matrix_Loc_BLEND = -1;
+GLint ScaleUV_Loc_BLEND = -1;
+GLint OffsetUV_Loc_BLEND = -1;
+GLint TexMix_Loc_BLEND = -1;
 GLint Matrix_Loc_CK = -1;
 GLint ScaleUV_Loc_CK = -1;
 GLint OffsetUV_Loc_CK = -1;
+GLint Opacity_Loc_CK = -1;
 GLint ChromaKeyColor_Loc_CK = -1;
 GLint ChromaKeyCutOff_Loc_CK = -1;
 GLint ChromaKeySensitivity_Loc_CK = -1;
@@ -96,6 +105,10 @@ tthread::thread * captureThread;
 bool flipFrame = false;
 bool fulldomeMode = false;
 bool recreatePlane = false;
+bool previousPlaneShow = true;
+float planeOpacity = 1.f;
+double planeOpacityStartTime = -1.0;
+
 glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
 
@@ -112,7 +125,6 @@ sgct::SharedFloat planeElevation(33.0f);
 sgct::SharedFloat planeRoll(0.0f);
 sgct::SharedFloat planeDistance(-5.0f);
 sgct::SharedBool planeShow(true);
-sgct::SharedFloat fadingTime(2.0f);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
 sgct::SharedFloat chromaKeyCutOff(0.1f);
@@ -229,12 +241,38 @@ void myDraw3DFun()
 
     if (texIndex.getVal() != -1)
     {
-        sgct::ShaderManager::instance()->bindShaderProgram("xform");
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texIds.getValAt(texIndex.getVal()));
-        glUniform2f(ScaleUV_Loc, 1.f, 1.f);
-        glUniform2f(OffsetUV_Loc, 0.f, 0.f);
-        glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &MVP[0][0]);
+		float mix = -1;
+		if (previousTexIndex != texIndex.getVal() && domeBlendStartTime == -1.0) {
+			domeBlendStartTime = curr_time.getVal();
+		}
+		if (domeBlendStartTime != -1) {
+			mix = static_cast<float>((curr_time.getVal() - domeBlendStartTime)) / fadingTime.getVal();
+			if (mix > 1) {
+				domeBlendStartTime = -1.0;
+				previousTexIndex = texIndex.getVal();
+			}
+		}
+
+		if(mix != -1){
+			sgct::ShaderManager::instance()->bindShaderProgram("textureblend");
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(previousTexIndex));
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(texIndex.getVal()));
+			glUniform2f(ScaleUV_Loc_BLEND, 1.f, 1.f);
+			glUniform2f(OffsetUV_Loc_BLEND, 0.f, 0.f);
+			glUniformMatrix4fv(Matrix_Loc_BLEND, 1, GL_FALSE, &MVP[0][0]);
+			glUniform1f(TexMix_Loc_BLEND, mix);
+		}
+		else {
+			sgct::ShaderManager::instance()->bindShaderProgram("xform");
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(texIndex.getVal()));
+			glUniform2f(ScaleUV_Loc, 1.f, 1.f);
+			glUniform2f(OffsetUV_Loc, 0.f, 0.f);
+			glUniform1f(Opacity_Loc, 1.f);
+			glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &MVP[0][0]);
+		}
 
         glFrontFace(GL_CW);
 
@@ -243,9 +281,38 @@ void myDraw3DFun()
 
     }
 
+	if (planeShow.getVal() != previousPlaneShow && planeOpacityStartTime == -1.0) {
+		planeOpacityStartTime = curr_time.getVal();
+	}
+
+	if (planeOpacityStartTime != -1) {
+		if (planeShow.getVal()) {
+			planeOpacity = static_cast<float>((curr_time.getVal() - planeOpacityStartTime)) / fadingTime.getVal();
+		}
+		else {
+			planeOpacity = 1.f - (static_cast<float>((curr_time.getVal() - planeOpacityStartTime)) / fadingTime.getVal());
+		}
+		
+		bool abort = false;
+		if (planeOpacity < 0.f) {
+			planeOpacity = 0.f;
+			abort = true;
+		}
+		else if (planeOpacity > 1.f) {
+			planeOpacity = 1.f;
+			abort = true;
+		}
+
+		if(abort) {
+			planeOpacityStartTime = -1.0;
+			previousPlaneShow = planeShow.getVal();
+		}
+	}
+
     GLint ScaleUV_L = ScaleUV_Loc;
     GLint OffsetUV_L = OffsetUV_Loc;
     GLint Matrix_L = Matrix_Loc;
+	GLint Opacity_L = Opacity_Loc;
     if (chromaKey.getVal())
     {
         sgct::ShaderManager::instance()->bindShaderProgram("chromakey");
@@ -259,6 +326,7 @@ void myDraw3DFun()
         ScaleUV_L = ScaleUV_Loc_CK;
         OffsetUV_L = OffsetUV_Loc_CK;
         Matrix_L = Matrix_Loc_CK;
+		Opacity_L = Opacity_Loc_CK;
     }
     else
     {
@@ -272,7 +340,9 @@ void myDraw3DFun()
 
     glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
 
-	if (planeShow.getVal()) {
+	if (planeOpacity > 0.f) {
+		glUniform1f(Opacity_L, planeOpacity);
+
 		if (fulldomeMode)
 		{
 			// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
@@ -610,8 +680,26 @@ void myInitOGLFun()
     Matrix_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation( "MVP" );
     ScaleUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation("scaleUV");
     OffsetUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation("offsetUV");
+	Opacity_Loc = sgct::ShaderManager::instance()->getShaderProgram("xform").getUniformLocation("opacity");
     GLint Tex_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation( "Tex" );
     glUniform1i( Tex_Loc, 0 );
+
+	sgct::ShaderManager::instance()->unBindShaderProgram();
+
+	sgct::ShaderManager::instance()->addShaderProgram("textureblend",
+		"xform.vert",
+		"textureblend.frag");
+
+	sgct::ShaderManager::instance()->bindShaderProgram("textureblend");
+
+	Matrix_Loc_BLEND = sgct::ShaderManager::instance()->getShaderProgram("textureblend").getUniformLocation("MVP");
+	ScaleUV_Loc_BLEND = sgct::ShaderManager::instance()->getShaderProgram("textureblend").getUniformLocation("scaleUV");
+	OffsetUV_Loc_BLEND = sgct::ShaderManager::instance()->getShaderProgram("textureblend").getUniformLocation("offsetUV");
+	GLint Tex_Blend_Loc0 = sgct::ShaderManager::instance()->getShaderProgram("textureblend").getUniformLocation("Tex0");
+	glUniform1i(Tex_Blend_Loc0, 0);
+	GLint Tex_Blend_Loc1 = sgct::ShaderManager::instance()->getShaderProgram("textureblend").getUniformLocation("Tex1");
+	glUniform1i(Tex_Blend_Loc1, 1);
+	TexMix_Loc_BLEND = sgct::ShaderManager::instance()->getShaderProgram("textureblend").getUniformLocation("texMix");
 
     sgct::ShaderManager::instance()->unBindShaderProgram();
 
@@ -624,6 +712,7 @@ void myInitOGLFun()
     Matrix_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("MVP");
     ScaleUV_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("scaleUV");
     OffsetUV_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("offsetUV");
+	Opacity_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("opacity");
     ChromaKeyColor_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyColor");
 	ChromaKeyCutOff_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyCutOff");
 	ChromaKeySensitivity_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyThresholdSensitivity");
@@ -651,6 +740,8 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeBool(&takeScreenshot);
     sgct::SharedData::instance()->writeBool(&renderDome);
     sgct::SharedData::instance()->writeInt32(&domeCut);
+	fadingTime.setVal(imFadingTime);
+	sgct::SharedData::instance()->writeFloat(&fadingTime);
 
 	if (planeScreenAspect.getVal() != imPlaneScreenAspect) recreatePlane = true;
 	planeScreenAspect.setVal(imPlaneScreenAspect);
@@ -673,11 +764,9 @@ void myEncodeFun()
 	sgct::SharedData::instance()->writeFloat(&planeRoll);
 	planeDistance.setVal(imPlaneDistance);
 	sgct::SharedData::instance()->writeFloat(&planeDistance);
-
 	planeShow.setVal(imPlaneShow);
 	sgct::SharedData::instance()->writeBool(&planeShow);
-	fadingTime.setVal(imFadingTime);
-	sgct::SharedData::instance()->writeFloat(&fadingTime);
+
 
 	chromaKey.setVal(imChromaKey);
 	sgct::SharedData::instance()->writeBool(&chromaKey);
@@ -702,6 +791,8 @@ void myDecodeFun()
     sgct::SharedData::instance()->readBool(&takeScreenshot);
     sgct::SharedData::instance()->readBool(&renderDome);
     sgct::SharedData::instance()->readInt32(&domeCut);
+	sgct::SharedData::instance()->readFloat(&fadingTime);
+	imFadingTime = fadingTime.getVal();
 
 	sgct::SharedData::instance()->readInt32(&planeScreenAspect);
 	if (planeScreenAspect.getVal() != imPlaneScreenAspect) recreatePlane = true;
@@ -724,11 +815,8 @@ void myDecodeFun()
 	imPlaneRoll = planeRoll.getVal();
 	sgct::SharedData::instance()->readFloat(&planeDistance);
 	imPlaneDistance = planeDistance.getVal();
-
 	sgct::SharedData::instance()->readBool(&planeShow);
 	imPlaneShow = planeShow.getVal();
-	sgct::SharedData::instance()->readFloat(&fadingTime);
-	imFadingTime = fadingTime.getVal();
 
 	sgct::SharedData::instance()->readBool(&chromaKey);
 	imChromaKey = chromaKey.getVal();

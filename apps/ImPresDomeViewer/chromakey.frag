@@ -8,6 +8,7 @@ uniform vec3 chromaKeyColor;
 uniform float chromaKeyCutOff;
 uniform float chromaKeyThresholdSensitivity;
 uniform float chromaKeySmoothing;
+uniform float opacity;
 
 in vec2 UV;
 out vec4 color;
@@ -25,8 +26,9 @@ void main()
     float Cb = 0.5647 * (texColor.b - Y);
      
     float blendValue = smoothstep(chromaKeyThresholdSensitivity, chromaKeyThresholdSensitivity + chromaKeySmoothing, distance(vec2(Cr, Cb), vec2(maskCr, maskCb)));
-    if(blendValue > chromaKeyCutOff)
-        color = vec4(texColor.rgb, texColor.a * blendValue);
+    if(blendValue > chromaKeyCutOff){
+        color = texColor * blendValue * opacity;
+	}
     else
         discard;
 }

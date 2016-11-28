@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fstream>
+#include <map>
 #include <algorithm> //used for transform string to lowercase
 #include <sgct.h>
 #include "Capture.hpp"
@@ -32,6 +33,21 @@ namespace ImGui
 	}
 
 }
+std::string getFileName(const std::string& s) {
+
+	char sep = '/';
+
+#ifdef _WIN32
+	sep = '\\';
+#endif
+
+	size_t i = s.rfind(sep, s.length());
+	if (i != std::string::npos) {
+		return(s.substr(i + 1, s.length() - i));
+	}
+
+	return("");
+}
 
 sgct::Engine * gEngine;
 Capture * gCapture = NULL;
@@ -53,6 +69,7 @@ void myContextCreationCallback(GLFWwindow * win);
 
 sgct_utils::SGCTPlane * mainPlane = NULL;
 sgct_utils::SGCTPlane * secondaryPlane = NULL;
+std::vector<sgct_utils::SGCTPlane *> contentPlanes;
 sgct_utils::SGCTDome * dome = NULL;
 
 GLFWwindow * hiddenWindow;
@@ -75,15 +92,19 @@ struct ContentPlane {
 	bool currentlyActive;
 	bool previouslyActive;
 	double fadeStartTime;
+	int planeStrId;
+	int planeTexId;
 
-	ContentPlane(float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0) :
+	ContentPlane(float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0, int pls = -1, int pli = -1) :
 		height(h), 
 		azimuth(a) ,
 		elevation(e) ,
 		roll(r) , 
 		currentlyActive(ca) , 
 		previouslyActive(pa) ,
-		fadeStartTime(f)
+		fadeStartTime(f) ,
+		planeStrId(pls) ,
+		planeTexId(pli)
 	{};
 };
 
@@ -101,11 +122,17 @@ tthread::thread * loadThread;
 tthread::mutex mutex;
 std::vector<sgct_core::Image *> transImages;
 
-sgct::SharedInt32 texIndex(-1);
+sgct::SharedInt32 domeTexIndex(-1);
 sgct::SharedInt32 incrIndex(1);
 sgct::SharedInt32 numSyncedTex(0);
-int previousTexIndex = -1;
+int currentDomeTexIdx = -1;
+int previousDomeTexIndex = 0;
 double domeBlendStartTime = -1.0;
+
+std::vector<std::pair<std::string, int>> imagePathsVec;
+std::map<std::string, int> imagePathsMap;
+std::vector<std::string> domeImageFileNames;
+std::vector<std::string> planeImageFileNames;
 
 sgct::SharedBool running(true);
 sgct::SharedInt32 lastPackage(-1);
@@ -113,8 +140,8 @@ sgct::SharedBool transfer(false);
 sgct::SharedBool serverUploadDone(false);
 sgct::SharedInt32 serverUploadCount(0);
 sgct::SharedBool clientsUploadDone(false);
-sgct::SharedVector<std::pair<std::string, int>> imagePaths;
 sgct::SharedVector<GLuint> texIds;
+sgct::SharedVector<float> texAspectRatio;
 double sendTimer = 0.0;
 
 enum imageType { IM_JPEG, IM_PNG };
@@ -146,7 +173,7 @@ GLint ChromaKeyColor_Loc_CK = -1;
 GLint ChromaKeyCutOff_Loc_CK = -1;
 GLint ChromaKeySensitivity_Loc_CK = -1;
 GLint ChromaKeySmoothing_Loc_CK = -1;
-GLuint texId = GL_FALSE;
+GLuint captureTexId = GL_FALSE;
 
 tthread::thread * captureThread;
 bool flipFrame = false;
@@ -182,6 +209,7 @@ float imPlaneAzimuth = 0.0f;
 float imPlaneElevation = 38.0f;
 float imPlaneRoll = 0.0f;
 bool imPlaneShow = true;
+int imPlaneImageIdx = 0;
 float imFadingTime = 2.0f;
 bool imChromaKey = false;
 ImVec4 imChromaKeyColor = ImColor(0, 219, 0);
@@ -322,26 +350,26 @@ void myDraw3DFun()
     //Set up backface culling
     glCullFace(GL_BACK);
 
-    if (texIndex.getVal() != -1)
+    if (domeTexIndex.getVal() != -1)
     {
 		float mix = -1;
-		if (previousTexIndex != texIndex.getVal() && domeBlendStartTime == -1.0) {
+		if (previousDomeTexIndex != domeTexIndex.getVal() && domeBlendStartTime == -1.0) {
 			domeBlendStartTime = curr_time.getVal();
 		}
 		if (domeBlendStartTime != -1) {
 			mix = static_cast<float>((curr_time.getVal() - domeBlendStartTime)) / fadingTime.getVal();
 			if (mix > 1) {
 				domeBlendStartTime = -1.0;
-				previousTexIndex = texIndex.getVal();
+				previousDomeTexIndex = domeTexIndex.getVal();
 			}
 		}
 
 		if(mix != -1){
 			sgct::ShaderManager::instance()->bindShaderProgram("textureblend");
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(previousTexIndex));
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(previousDomeTexIndex));
 			glActiveTexture(GL_TEXTURE1);
-			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(texIndex.getVal()));
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(domeTexIndex.getVal()));
 			glUniform2f(ScaleUV_Loc_BLEND, 1.f, 1.f);
 			glUniform2f(OffsetUV_Loc_BLEND, 0.f, 0.f);
 			glUniformMatrix4fv(Matrix_Loc_BLEND, 1, GL_FALSE, &MVP[0][0]);
@@ -350,7 +378,7 @@ void myDraw3DFun()
 		else {
 			sgct::ShaderManager::instance()->bindShaderProgram("xform");
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(texIndex.getVal()));
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(domeTexIndex.getVal()));
 			glUniform2f(ScaleUV_Loc, 1.f, 1.f);
 			glUniform2f(OffsetUV_Loc, 0.f, 0.f);
 			glUniform1f(Opacity_Loc, 1.f);
@@ -394,7 +422,13 @@ void myDraw3DFun()
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texId);
+	if (planeAttributes.getVal()[0].planeStrId > 0) {
+		glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[0].planeTexId));
+	}
+	else {
+		glBindTexture(GL_TEXTURE_2D, captureTexId);
+	}
+
 
     glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
 
@@ -459,6 +493,36 @@ void myDraw3DFun()
 		secondaryPlane->draw();
 	}
 
+	for (int i = 2; i < planeAttributes.getSize(); i++) {
+		planeOpacity = getContentPlaneOpacity(i);
+		if (planeOpacity > 0.f && contentPlanes.size() > i-2) {
+			glActiveTexture(GL_TEXTURE0);
+			if (planeAttributes.getVal()[i].planeStrId > 0) {
+				glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
+			}
+			else {
+				glBindTexture(GL_TEXTURE_2D, captureTexId);
+			}
+
+			glUniform1f(Opacity_L, planeOpacity);
+
+			glUniform2f(ScaleUV_L, 1.0f, 1.0f);
+			glUniform2f(OffsetUV_L, 0.0f, 0.0f);
+
+			//transform and draw plane
+			glm::mat4 contentPlaneTransform = glm::mat4(1.0f);
+			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+			contentPlaneTransform = glm::translate(contentPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+
+			contentPlaneTransform = MVP * contentPlaneTransform;
+			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &contentPlaneTransform[0][0]);
+
+			contentPlanes[i-2]->draw();
+		}
+	}
+
     sgct::ShaderManager::instance()->unBindShaderProgram();
 
     glDisable(GL_CULL_FACE);
@@ -489,31 +553,45 @@ void myDraw2DFun()
 
 		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Settings");
-		if (!imPlaneUseCaptureSize) {
-			ImGui::RadioButton("16:10", &imPlaneScreenAspect, 1610); ImGui::SameLine();
-			ImGui::RadioButton("16:9", &imPlaneScreenAspect, 169); ImGui::SameLine();
-			ImGui::RadioButton("5:4", &imPlaneScreenAspect, 54); ImGui::SameLine();
-			ImGui::RadioButton("4:3", &imPlaneScreenAspect, 43); ImGui::SameLine();
-			ImGui::Text("  -  Capture Screen Aspect Ratio");
-			ImGui::RadioButton("16;10", &imPlaneMaterialAspect, 1610); ImGui::SameLine();
-			ImGui::RadioButton("16;9", &imPlaneMaterialAspect, 169); ImGui::SameLine();
-			ImGui::RadioButton("5;4", &imPlaneMaterialAspect, 54); ImGui::SameLine();
-			ImGui::RadioButton("4;3", &imPlaneMaterialAspect, 43); ImGui::SameLine();
-			ImGui::Text("  -  Capture Material Aspect Ratio");
+		if (currentDomeTexIdx >= 0) {
+			ImGui::Combo("Current Fisheye Image", &currentDomeTexIdx, domeImageFileNames);
 		}
-		ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
-		ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
-		ImGui::Checkbox("Show Plane", &imPlaneShow);
-		ImGui::SliderFloat("Plane Height", &imPlaneHeight, 1.0f, 10.0f);
-		ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
-		ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
-		ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
 		ImGui::SliderFloat("Fading Time", &imFadingTime, 0.f, 5.0f);
-		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
-		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
-		ImGui::SliderFloat("Chroma Key CutOff", &imChromaKeyCutOff, 0.f, 0.5f);
-		ImGui::SliderFloat("Chroma Key Sensitivity", &imChromaKeySensitivity, 0.f, 0.05f);
-		ImGui::SliderFloat("Chroma Key Smoothing", &imChromaKeySmoothing, 0.f, 0.05f);
+		if (ImGui::CollapsingHeader("Flat Content", 0, true, true))
+		{
+			if (!imPlaneUseCaptureSize) {
+				ImGui::RadioButton("16:10", &imPlaneScreenAspect, 1610); ImGui::SameLine();
+				ImGui::RadioButton("16:9", &imPlaneScreenAspect, 169); ImGui::SameLine();
+				ImGui::RadioButton("5:4", &imPlaneScreenAspect, 54); ImGui::SameLine();
+				ImGui::RadioButton("4:3", &imPlaneScreenAspect, 43); ImGui::SameLine();
+				ImGui::Text("  -  Capture Screen Aspect Ratio");
+				ImGui::RadioButton("16;10", &imPlaneMaterialAspect, 1610); ImGui::SameLine();
+				ImGui::RadioButton("16;9", &imPlaneMaterialAspect, 169); ImGui::SameLine();
+				ImGui::RadioButton("5;4", &imPlaneMaterialAspect, 54); ImGui::SameLine();
+				ImGui::RadioButton("4;3", &imPlaneMaterialAspect, 43); ImGui::SameLine();
+				ImGui::Text("  -  Capture Material Aspect Ratio");
+			}
+			ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
+			if (ImGui::Button("Add New Plane")) {
+				imPlanes.push_back("Content " + std::to_string((imPlanes.size() - 1)));
+				planeAttributes.addVal(ContentPlane(3.0f, 0.f, 90.f, 0.f));
+			}
+			ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
+			ImGui::Checkbox("Show Plane", &imPlaneShow);
+			ImGui::Combo("Plane Source", &imPlaneImageIdx, planeImageFileNames);
+			ImGui::SliderFloat("Plane Height", &imPlaneHeight, 1.0f, 10.0f);
+			ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
+			ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
+			ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
+			if (ImGui::CollapsingHeader("Advanced", 0, true, false))
+			{
+				ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
+				ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
+				ImGui::SliderFloat("Chroma Key CutOff", &imChromaKeyCutOff, 0.f, 0.5f);
+				ImGui::SliderFloat("Chroma Key Sensitivity", &imChromaKeySensitivity, 0.f, 0.05f);
+				ImGui::SliderFloat("Chroma Key Smoothing", &imChromaKeySmoothing, 0.f, 0.05f);
+			}
+		}
 		ImGui::End();
 
 		ImGui::Render();
@@ -531,8 +609,11 @@ void myPreSyncFun()
         {
             numSyncedTex = static_cast<int32_t>(texIds.getSize());
             
-            //only iterate up to the first new image, even if multiple images was added
-            texIndex = numSyncedTex - serverUploadCount.getVal();
+            //only iterate up if we have no image
+			if (domeTexIndex < 0) {
+				domeTexIndex = numSyncedTex - serverUploadCount.getVal();
+				currentDomeTexIdx = domeTexIndex.getVal();
+			}
 
             serverUploadDone = false;
             clientsUploadDone = false;
@@ -738,6 +819,17 @@ void createCapturePlanes() {
 		}
 	}
 
+	//Content planes
+	for (int i = 0; i < contentPlanes.size(); i++) {
+		delete contentPlanes[i];
+	}
+	contentPlanes.clear();
+
+	for (int i = 2; i < planeAttributes.getSize(); i++) {
+		float width = planeAttributes.getVal()[i].height * texAspectRatio.getValAt(planeAttributes.getVal()[i].planeTexId);
+		contentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributes.getVal()[i].height));
+	}
+
 	planeReCreate.setVal(false);
 }
 
@@ -763,6 +855,7 @@ void myInitOGLFun()
 	imPlanes.push_back("Seconday Capture Plane");
 	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll));
 	planeAttributes.addVal(ContentPlane(2.5f, -140.f, 20.f, imPlaneRoll));
+	planeImageFileNames.push_back("Capture Card");
 
     //create plane
 	createCapturePlanes();
@@ -834,7 +927,12 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeBool(&info);
     sgct::SharedData::instance()->writeBool(&stats);
     sgct::SharedData::instance()->writeBool(&wireframe);
-    sgct::SharedData::instance()->writeInt32(&texIndex);
+
+	if (numSyncedTex > 0) {
+		domeTexIndex.setVal(imagePathsMap[domeImageFileNames[currentDomeTexIdx]]);
+	}
+	sgct::SharedData::instance()->writeInt32(&domeTexIndex);
+
     sgct::SharedData::instance()->writeInt32(&incrIndex);
     sgct::SharedData::instance()->writeBool(&takeScreenshot);
     sgct::SharedData::instance()->writeBool(&renderDome);
@@ -860,10 +958,12 @@ void myEncodeFun()
 		imPlaneRoll = pA[imPlaneIdx].roll;
 		imPlaneShow = pA[imPlaneIdx].currentlyActive;
 		imPlanePreviousIdx = imPlaneIdx;
+		imPlaneImageIdx = pA[imPlaneIdx].planeStrId;
 	}
 
 	if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
-	pA[imPlaneIdx] = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive, pA[imPlaneIdx].fadeStartTime);
+	if (planeAttributes.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
+	pA[imPlaneIdx] = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive, pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]]);
 	planeAttributes.setVal(pA);
 	sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
 	sgct::SharedData::instance()->writeBool(&planeReCreate);
@@ -886,7 +986,7 @@ void myDecodeFun()
     sgct::SharedData::instance()->readBool(&info);
     sgct::SharedData::instance()->readBool(&stats);
     sgct::SharedData::instance()->readBool(&wireframe);
-    sgct::SharedData::instance()->readInt32(&texIndex);
+    sgct::SharedData::instance()->readInt32(&domeTexIndex);
     sgct::SharedData::instance()->readInt32(&incrIndex);
     sgct::SharedData::instance()->readBool(&takeScreenshot);
     sgct::SharedData::instance()->readBool(&renderDome);
@@ -917,10 +1017,10 @@ void myCleanUpFun()
 	if (secondaryPlane != NULL)
 		delete secondaryPlane;
 
-    if (texId)
+    if (captureTexId)
     {
-        glDeleteTextures(1, &texId);
-        texId = GL_FALSE;
+        glDeleteTextures(1, &captureTexId);
+		captureTexId = GL_FALSE;
     }
     
     for(std::size_t i=0; i < texIds.getSize(); i++)
@@ -985,21 +1085,21 @@ void myKeyCallback(int key, int action)
 				renderDome.setVal(false);
 			break;
 
-		case SGCT_KEY_LEFT:
+		/*case SGCT_KEY_LEFT:
 			if (action == SGCT_PRESS && numSyncedTex.getVal() > 0)
 			{
-				texIndex.getVal() > incrIndex.getVal() - 1 ? texIndex -= incrIndex.getVal() : texIndex.setVal(numSyncedTex.getVal() - 1);
-				//fprintf(stderr, "Index set to: %d\n", texIndex.getVal());
+				domeTexIndex.getVal() > incrIndex.getVal() - 1 ? domeTexIndex -= incrIndex.getVal() : domeTexIndex.setVal(numSyncedTex.getVal() - 1);
+				//fprintf(stderr, "Index set to: %d\n", domeTexIndex.getVal());
 			}
 			break;
 
 		case SGCT_KEY_RIGHT:
 			if (action == SGCT_PRESS && numSyncedTex.getVal() > 0)
 			{
-				texIndex.setVal((texIndex.getVal() + incrIndex.getVal()) % numSyncedTex.getVal());
-				//fprintf(stderr, "Index set to: %d\n", texIndex.getVal());
+				domeTexIndex.setVal((domeTexIndex.getVal() + incrIndex.getVal()) % numSyncedTex.getVal());
+				//fprintf(stderr, "Index set to: %d\n", domeTexIndex.getVal());
 			}
-			break;
+			break;*/
 		}
 
 		ImGui_ImplGlfwGL3_KeyCallback(gEngine->getCurrentWindowPtr()->getWindowHandle(), key, 0, action, 0);
@@ -1129,25 +1229,25 @@ void startDataTransfer()
     id++;
 
     //make sure to keep within bounds
-    if(static_cast<int>(imagePaths.getSize()) > id)
+    if(static_cast<int>(imagePathsVec.size()) > id)
     {
         sendTimer = sgct::Engine::getTime();
 
-        int imageCounter = static_cast<int32_t>(imagePaths.getSize());
+        int imageCounter = static_cast<int32_t>(imagePathsVec.size());
         lastPackage.setVal(imageCounter - 1);
 
         for (int i = id; i < imageCounter; i++)
         {
             //load from file
-            std::pair<std::string, int> tmpPair = imagePaths.getValAt(static_cast<std::size_t>(i));
+            std::pair<std::string, int> tmpImagePair = imagePathsVec.at(static_cast<std::size_t>(i));
 
-            std::ifstream file(tmpPair.first.c_str(), std::ios::binary);
+            std::ifstream file(tmpImagePair.first.c_str(), std::ios::binary);
             file.seekg(0, std::ios::end);
             std::streamsize size = file.tellg();
             file.seekg(0, std::ios::beg);
 
             std::vector<char> buffer(size + headerSize);
-            char type = tmpPair.second;
+            char type = tmpImagePair.second;
 
             //write header (single unsigned char)
             buffer[0] = type;
@@ -1264,6 +1364,8 @@ void uploadTexture()
                 sgct::MessageHandler::instance()->print("Texture id %d loaded (%dx%dx%d).\n", tex, transImages[i]->getWidth(), transImages[i]->getHeight(), transImages[i]->getChannels());
 
                 texIds.addVal(tex);
+				float aspectRatio = (static_cast<float>(transImages[i]->getWidth()) / static_cast<float>(transImages[i]->getHeight()));
+				texAspectRatio.addVal(aspectRatio);
 
                 delete transImages[i];
                 transImages[i] = NULL;
@@ -1271,6 +1373,7 @@ void uploadTexture()
             else //if invalid load
             {
                 texIds.addVal(GL_FALSE);
+				texAspectRatio.addVal(-1.f);
             }
         }//end for
 
@@ -1308,38 +1411,28 @@ void myDropCallback(int count, const char** paths)
         //iterate all drop paths
         for (int i = 0; i < pathStrings.size(); i++)
         {
-            std::size_t found;
-
             std::string tmpStr = pathStrings[i];
 
-            //find file type
-            found = tmpStr.find(".jpg");
-            if (found != std::string::npos)
-            {
-                imagePaths.addVal(std::pair<std::string, int>(pathStrings[i], IM_JPEG));
-                transfer.setVal(true); //tell transfer thread to start processing data
-                serverUploadCount++;
-            }
-            else
-            {
-                found = tmpStr.find(".jpeg");
-                if (found != std::string::npos)
-                {
-                    imagePaths.addVal(std::pair<std::string, int>(pathStrings[i], IM_JPEG));
-                    transfer.setVal(true); //tell transfer thread to start processing data
-                    serverUploadCount++;
-                }
-                else
-                {
-                    found = tmpStr.find(".png");
-                    if (found != std::string::npos)
-                    {
-                        imagePaths.addVal(std::pair<std::string, int>(pathStrings[i], IM_PNG));
-                        transfer.setVal(true); //tell transfer thread to start processing data
-                        serverUploadCount++;
-                    }
-                }
-            }
+            //find and add supported file type
+  			bool found = false;
+			int type = 0;
+			if (tmpStr.find(".jpg") != std::string::npos || tmpStr.find(".jpeg") != std::string::npos) {
+				type = IM_JPEG;
+				found = true;
+			}
+			else if (tmpStr.find(".png") != std::string::npos) {
+				type = IM_PNG;
+				found = true;
+			}
+			if (found) {
+				imagePathsVec.push_back(std::pair<std::string, int>(pathStrings[i], type));
+				std::string fileName = getFileName(pathStrings[i]);
+				imagePathsMap.insert(std::pair<std::string, int>(fileName, static_cast<int>(imagePathsVec.size()-1)));
+				domeImageFileNames.push_back(fileName);
+				planeImageFileNames.push_back(fileName);
+				transfer.setVal(true); //tell transfer thread to start processing data
+				serverUploadCount++;
+			}
         }
     }
 }
@@ -1388,8 +1481,8 @@ void allocateTexture()
         return;
     }
 
-    glGenTextures(1, &texId);
-    glBindTexture(GL_TEXTURE_2D, texId);
+    glGenTextures(1, &captureTexId);
+    glBindTexture(GL_TEXTURE_2D, captureTexId);
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -1408,7 +1501,7 @@ void uploadData(uint8_t ** data, int width, int height)
     // should be used to control that the uploaded texture is the same
     // for all viewports to prevent any tearing and maintain frame sync
 
-    if (texId)
+    if (captureTexId)
     {
         unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
         if (GPU_ptr)
@@ -1436,7 +1529,7 @@ void uploadData(uint8_t ** data, int width, int height)
             glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
             glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, texId);
+            glBindTexture(GL_TEXTURE_2D, captureTexId);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
         }
 

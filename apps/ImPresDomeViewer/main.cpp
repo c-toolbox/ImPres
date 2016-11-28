@@ -66,6 +66,27 @@ sgct::SharedBool takeScreenshot(false);
 sgct::SharedBool wireframe(false);
 sgct::SharedFloat fadingTime(2.0f);
 
+//structs
+struct ContentPlane {
+	float height;
+	float azimuth;
+	float elevation;
+	float roll;
+	bool currentlyActive;
+	bool previouslyActive;
+	double fadeStartTime;
+
+	ContentPlane(float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0) :
+		height(h), 
+		azimuth(a) ,
+		elevation(e) ,
+		roll(r) , 
+		currentlyActive(ca) , 
+		previouslyActive(pa) ,
+		fadeStartTime(f)
+	{};
+};
+
 //DomeImageViewer
 void myDropCallback(int count, const char** paths);
 void myDataTransferDecoder(void * receivedData, int receivedlength, int packageId, int clientIndex);
@@ -130,9 +151,6 @@ GLuint texId = GL_FALSE;
 tthread::thread * captureThread;
 bool flipFrame = false;
 bool fulldomeMode = false;
-bool previousPlaneShow = true;
-float planeOpacity = 1.f;
-double planeOpacityStartTime = -1.0;
 
 glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
@@ -144,9 +162,8 @@ sgct::SharedInt32 domeCut(2);
 sgct::SharedInt planeScreenAspect(1610);
 sgct::SharedInt planeMaterialAspect(169);
 sgct::SharedBool planeUseCaptureSize(false);
-sgct::SharedVector<glm::vec4> planeAttributes;
+sgct::SharedVector<ContentPlane> planeAttributes;
 sgct::SharedBool planeReCreate(false);
-sgct::SharedBool planeShow(true);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
 sgct::SharedFloat chromaKeyCutOff(0.1f);
@@ -250,6 +267,51 @@ int main( int argc, char* argv[] )
     exit( EXIT_SUCCESS );
 }
 
+float getContentPlaneOpacity(int planeIdx) {
+	std::vector<ContentPlane> pA = planeAttributes.getVal();
+	ContentPlane pl = pA[planeIdx];
+
+	float planeOpacity = 1.f;
+
+	if (pl.currentlyActive != pl.previouslyActive && pl.fadeStartTime == -1.0) {
+		pl.fadeStartTime = curr_time.getVal();
+		pl.previouslyActive = pl.currentlyActive;
+		
+		pA[planeIdx] = pl;
+		planeAttributes.setVal(pA);
+	}
+
+	if (pl.fadeStartTime != -1.0) {
+		if (pl.currentlyActive) {
+			planeOpacity = static_cast<float>((curr_time.getVal() - pl.fadeStartTime)) / fadingTime.getVal();
+		}
+		else {
+			planeOpacity = 1.f - (static_cast<float>((curr_time.getVal() - pl.fadeStartTime)) / fadingTime.getVal());
+		}
+
+		bool abort = false;
+		if (planeOpacity < 0.f) {
+			planeOpacity = 0.f;
+			abort = true;
+		}
+		else if (planeOpacity > 1.f) {
+			planeOpacity = 1.f;
+			abort = true;
+		}
+
+		if (abort) {
+			pl.fadeStartTime = -1.0;
+			pA[planeIdx] = pl;
+			planeAttributes.setVal(pA);
+		}
+	}
+	else if (!pl.currentlyActive) {
+		planeOpacity = 0.f;
+	}
+
+	return planeOpacity;
+}
+
 void myDraw3DFun()
 {
     glEnable(GL_DEPTH_TEST);
@@ -302,34 +364,6 @@ void myDraw3DFun()
 
     }
 
-	if (planeShow.getVal() != previousPlaneShow && planeOpacityStartTime == -1.0) {
-		planeOpacityStartTime = curr_time.getVal();
-	}
-
-	if (planeOpacityStartTime != -1) {
-		if (planeShow.getVal()) {
-			planeOpacity = static_cast<float>((curr_time.getVal() - planeOpacityStartTime)) / fadingTime.getVal();
-		}
-		else {
-			planeOpacity = 1.f - (static_cast<float>((curr_time.getVal() - planeOpacityStartTime)) / fadingTime.getVal());
-		}
-		
-		bool abort = false;
-		if (planeOpacity < 0.f) {
-			planeOpacity = 0.f;
-			abort = true;
-		}
-		else if (planeOpacity > 1.f) {
-			planeOpacity = 1.f;
-			abort = true;
-		}
-
-		if(abort) {
-			planeOpacityStartTime = -1.0;
-			previousPlaneShow = planeShow.getVal();
-		}
-	}
-
     GLint ScaleUV_L = ScaleUV_Loc;
     GLint OffsetUV_L = OffsetUV_Loc;
     GLint Matrix_L = Matrix_Loc;
@@ -364,6 +398,7 @@ void myDraw3DFun()
 
     glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
 
+	float planeOpacity = getContentPlaneOpacity(0);
 	if (planeOpacity > 0.f) {
 		glUniform1f(Opacity_L, planeOpacity);
 
@@ -393,25 +428,29 @@ void myDraw3DFun()
 
 			//transform and draw plane
 			glm::mat4 mainPlaneTransform = glm::mat4(1.0f);
-			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].y), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].z), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].w), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-			mainPlaneTransform = glm::translate(mainPlaneTransform, glm::vec3(0.0f, 0.0f,-5.0f)); //distance
+			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+			mainPlaneTransform = glm::translate(mainPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
 
 			mainPlaneTransform = MVP * mainPlaneTransform;
 			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &mainPlaneTransform[0][0]);
 
 			mainPlane->draw();
 		}
+	}
+	planeOpacity = getContentPlaneOpacity(1);
+	if (planeOpacity > 0.f) {
+		glUniform1f(Opacity_L, planeOpacity);
 
 		glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
 		glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
 
 		//transform and draw plane
 		glm::mat4 secondaryPlaneTransform = glm::mat4(1.0f);
-		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].y), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].z), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].w), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
 		secondaryPlaneTransform = glm::translate(secondaryPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
 
 		secondaryPlaneTransform = MVP * secondaryPlaneTransform;
@@ -463,12 +502,12 @@ void myDraw2DFun()
 			ImGui::Text("  -  Capture Material Aspect Ratio");
 		}
 		ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
-		ImGui::Checkbox("Show Capture Planes", &imPlaneShow);
 		ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
-		ImGui::SliderFloat("Capture Height", &imPlaneHeight, 1.0f, 10.0f);
-		ImGui::SliderFloat("Capture Azimuth", &imPlaneAzimuth, -180.f, 180.f);
-		ImGui::SliderFloat("Capture Elevation", &imPlaneElevation, -180.f, 180.f);
-		ImGui::SliderFloat("Capture Roll", &imPlaneRoll, -180.f, 180.f);
+		ImGui::Checkbox("Show Plane", &imPlaneShow);
+		ImGui::SliderFloat("Plane Height", &imPlaneHeight, 1.0f, 10.0f);
+		ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
+		ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
+		ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
 		ImGui::SliderFloat("Fading Time", &imFadingTime, 0.f, 5.0f);
 		ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
 		ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
@@ -548,37 +587,37 @@ void createCapturePlanes() {
 		delete secondaryPlane;
 
 	float captureRatio = (static_cast<float>(gCapture->getWidth()) / static_cast<float>(gCapture->getHeight()));
-	float mainPlaneWidth = planeAttributes.getVal()[0].x * captureRatio;
-	float secondaryPlaneWidth = planeAttributes.getVal()[1].x * captureRatio;
+	float mainPlaneWidth = planeAttributes.getVal()[0].height * captureRatio;
+	float secondaryPlaneWidth = planeAttributes.getVal()[1].height * captureRatio;
 
 	if (planeUseCaptureSize.getVal())
 	{
-		mainPlane = new sgct_utils::SGCTPlane(mainPlaneWidth, planeAttributes.getVal()[0].x);
-		secondaryPlane = new sgct_utils::SGCTPlane(secondaryPlaneWidth, planeAttributes.getVal()[1].x);
+		mainPlane = new sgct_utils::SGCTPlane(mainPlaneWidth, planeAttributes.getVal()[0].height);
+		secondaryPlane = new sgct_utils::SGCTPlane(secondaryPlaneWidth, planeAttributes.getVal()[1].height);
 	}
 	else
 	{
 		switch (planeMaterialAspect.getVal())
 		{
 		case 1610:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].x / 10.0f) * 16.0f, planeAttributes.getVal()[0].x);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].x / 10.0f) * 16.0f, planeAttributes.getVal()[1].x);
+			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 10.0f) * 16.0f, planeAttributes.getVal()[0].height);
+			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 10.0f) * 16.0f, planeAttributes.getVal()[1].height);
 			break;
 		case 169:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].x / 9.0f) * 16.0f, planeAttributes.getVal()[0].x);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].x / 9.0f) * 16.0f, planeAttributes.getVal()[1].x);
+			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 9.0f) * 16.0f, planeAttributes.getVal()[0].height);
+			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 9.0f) * 16.0f, planeAttributes.getVal()[1].height);
 			break;
 		case 54:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].x / 4.0f) * 5.0f, planeAttributes.getVal()[0].x);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].x / 4.0f) * 5.0f, planeAttributes.getVal()[1].x);
+			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 4.0f) * 5.0f, planeAttributes.getVal()[0].height);
+			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 4.0f) * 5.0f, planeAttributes.getVal()[1].height);
 			break;
 		case 43:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].x / 3.0f) * 4.0f, planeAttributes.getVal()[0].x);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].x / 3.0f) * 4.0f, planeAttributes.getVal()[1].x);
+			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 3.0f) * 4.0f, planeAttributes.getVal()[0].height);
+			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 3.0f) * 4.0f, planeAttributes.getVal()[1].height);
 			break;
 		default:
-			mainPlane = new sgct_utils::SGCTPlane(mainPlaneWidth, planeAttributes.getVal()[0].x);
-			secondaryPlane = new sgct_utils::SGCTPlane(secondaryPlaneWidth, planeAttributes.getVal()[1].x);
+			mainPlane = new sgct_utils::SGCTPlane(mainPlaneWidth, planeAttributes.getVal()[0].height);
+			secondaryPlane = new sgct_utils::SGCTPlane(secondaryPlaneWidth, planeAttributes.getVal()[1].height);
 			break;
 		}
 	}
@@ -720,10 +759,10 @@ void myInitOGLFun()
     gCapture->setVideoDecoderCallback(callback);
 
 	//define main and secondary planes
-	imPlanes.push_back("Main Capture");
-	imPlanes.push_back("Seconday Capture");
-	planeAttributes.addVal(glm::vec4(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll));
-	planeAttributes.addVal(glm::vec4(2.5f, -140.f, 20.f, imPlaneRoll));
+	imPlanes.push_back("Main Capture Plane");
+	imPlanes.push_back("Seconday Capture Plane");
+	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll));
+	planeAttributes.addVal(ContentPlane(2.5f, -140.f, 20.f, imPlaneRoll));
 
     //create plane
 	createCapturePlanes();
@@ -813,22 +852,21 @@ void myEncodeFun()
 	planeUseCaptureSize.setVal(imPlaneUseCaptureSize);
 	sgct::SharedData::instance()->writeBool(&planeUseCaptureSize);
 
-	std::vector<glm::vec4> pA = planeAttributes.getVal();
+	std::vector<ContentPlane> pA = planeAttributes.getVal();
 	if (imPlaneIdx != imPlanePreviousIdx) {
-		imPlaneHeight = pA[imPlaneIdx].x;
-		imPlaneAzimuth = pA[imPlaneIdx].y;
-		imPlaneElevation = pA[imPlaneIdx].z;
-		imPlaneRoll = pA[imPlaneIdx].w;
+		imPlaneHeight = pA[imPlaneIdx].height;
+		imPlaneAzimuth = pA[imPlaneIdx].azimuth;
+		imPlaneElevation = pA[imPlaneIdx].elevation;
+		imPlaneRoll = pA[imPlaneIdx].roll;
+		imPlaneShow = pA[imPlaneIdx].currentlyActive;
 		imPlanePreviousIdx = imPlaneIdx;
 	}
 
-	if (planeAttributes.getVal()[imPlaneIdx].x != imPlaneHeight) planeReCreate.setVal(true);
-	pA[imPlaneIdx] = glm::vec4(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll);
+	if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
+	pA[imPlaneIdx] = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive, pA[imPlaneIdx].fadeStartTime);
 	planeAttributes.setVal(pA);
-	sgct::SharedData::instance()->writeVector<glm::vec4>(&planeAttributes);
+	sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
 	sgct::SharedData::instance()->writeBool(&planeReCreate);
-	planeShow.setVal(imPlaneShow);
-	sgct::SharedData::instance()->writeBool(&planeShow);
 
 	chromaKey.setVal(imChromaKey);
 	sgct::SharedData::instance()->writeBool(&chromaKey);
@@ -858,9 +896,8 @@ void myDecodeFun()
 	sgct::SharedData::instance()->readInt32(&planeScreenAspect);
 	sgct::SharedData::instance()->readInt32(&planeMaterialAspect);
 	sgct::SharedData::instance()->readBool(&planeUseCaptureSize);
-	sgct::SharedData::instance()->readVector<glm::vec4>(&planeAttributes);
+	sgct::SharedData::instance()->readVector<ContentPlane>(&planeAttributes);
 	sgct::SharedData::instance()->readBool(&planeReCreate);
-	sgct::SharedData::instance()->readBool(&planeShow);
 
 	sgct::SharedData::instance()->readBool(&chromaKey);
 	sgct::SharedData::instance()->readObj(&chromaKeyColor);

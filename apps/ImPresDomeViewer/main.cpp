@@ -584,7 +584,7 @@ void myDraw2DFun()
 			ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
 			ImGui::Checkbox("Show Plane", &imPlaneShow);
 			ImGui::Combo("Plane Source", &imPlaneImageIdx, planeImageFileNames);
-			ImGui::SliderFloat("Plane Height", &imPlaneHeight, 1.0f, 10.0f);
+			ImGui::SliderFloat("Plane Height", &imPlaneHeight, 0.1f, 10.0f);
 			ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
 			ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
 			ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);

@@ -5,6 +5,7 @@
 			<Stereo type="none" />
 			<Size x="1024" y="1024" />
 			<!-- Frame buffer resolution -->
+            <Res x="4096" y="4096" />
 			<!--
 				quality options (cubemap size):
 					- low (256)
@@ -18,12 +19,13 @@
 			<Viewport name="fisheye">
 				<Pos x="0.0" y="0.0" />
 				<Size x="1.0" y="1.0" />
-				<FisheyeProjection fov="180" quality="1k">
+				<FisheyeProjection fov="180" quality="4k">
 					<Background r="0.2" g="0.2" b="0.2" a="1.0" />
 				</FisheyeProjection>
 			</Viewport>
 		</Window>
 	</Node>
+    <Capture path="C:/Users/Public/Desktop/ImPres" />
 	<User eyeSeparation="0.06">
 		<Pos x="0.0" y="0.0" z="0.0" />
 	</User>

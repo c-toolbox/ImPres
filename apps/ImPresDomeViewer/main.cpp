@@ -79,8 +79,6 @@ GLFWwindow * sharedWindow;
 sgct::SharedDouble curr_time(0.0);
 sgct::SharedBool info(false);
 sgct::SharedBool stats(false);
-sgct::SharedBool takeScreenshot(false);
-sgct::SharedBool wireframe(false);
 sgct::SharedFloat fadingTime(2.0f);
 
 //structs
@@ -95,7 +93,7 @@ struct ContentPlane {
 	int planeStrId;
 	int planeTexId;
 
-	ContentPlane(float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0, int pls = -1, int pli = -1) :
+	ContentPlane(float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0, int pls = 0, int pli = 0) :
 		height(h), 
 		azimuth(a) ,
 		elevation(e) ,
@@ -128,6 +126,8 @@ sgct::SharedInt32 numSyncedTex(0);
 int currentDomeTexIdx = -1;
 int previousDomeTexIndex = 0;
 double domeBlendStartTime = -1.0;
+bool takeScreenshot = false;
+bool screenshotPassOn = false;
 
 std::vector<std::pair<std::string, int>> imagePathsVec;
 std::map<std::string, int> imagePathsMap;
@@ -420,77 +420,81 @@ void myDraw3DFun()
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	float planeOpacity;
 
-    glActiveTexture(GL_TEXTURE0);
-	if (planeAttributes.getVal()[0].planeStrId > 0) {
-		glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[0].planeTexId));
-	}
-	else {
-		glBindTexture(GL_TEXTURE_2D, captureTexId);
-	}
-
-
-    glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
-
-	float planeOpacity = getContentPlaneOpacity(0);
-	if (planeOpacity > 0.f) {
-		glUniform1f(Opacity_L, planeOpacity);
-
-		if (fulldomeMode)
-		{
-			// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
-			if (domeCut.getVal() == 2) {
-				glUniform2f(ScaleUV_L, texSize.y / texSize.x, 1.f);
-				glUniform2f(OffsetUV_L, ((texSize.x - texSize.y)*0.5f) / texSize.x, 0.f);
-			}
-			else {
-				glUniform2f(ScaleUV_L, 1.f, 1.f);
-				glUniform2f(OffsetUV_L, 0.f, 0.f);
-			}
-
-			glCullFace(GL_FRONT); //camera on the inside of the dome
-
-			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &MVP[0][0]);
-			dome->draw();
+	//No capture planes when taking screenshot
+	if (!screenshotPassOn) {
+		glActiveTexture(GL_TEXTURE0);
+		if (planeAttributes.getVal()[0].planeStrId > 0) {
+			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[0].planeTexId));
 		}
-		else //plane mode
-		{
+		else {
+			glBindTexture(GL_TEXTURE_2D, captureTexId);
+		}
+
+
+		glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
+
+		planeOpacity = getContentPlaneOpacity(0);
+		if (planeOpacity > 0.f) {
+			glUniform1f(Opacity_L, planeOpacity);
+
+			if (fulldomeMode)
+			{
+				// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
+				if (domeCut.getVal() == 2) {
+					glUniform2f(ScaleUV_L, texSize.y / texSize.x, 1.f);
+					glUniform2f(OffsetUV_L, ((texSize.x - texSize.y)*0.5f) / texSize.x, 0.f);
+				}
+				else {
+					glUniform2f(ScaleUV_L, 1.f, 1.f);
+					glUniform2f(OffsetUV_L, 0.f, 0.f);
+				}
+
+				glCullFace(GL_FRONT); //camera on the inside of the dome
+
+				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &MVP[0][0]);
+				dome->draw();
+			}
+			else //plane mode
+			{
+				glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
+				glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
+
+				glCullFace(GL_BACK);
+
+				//transform and draw plane
+				glm::mat4 mainPlaneTransform = glm::mat4(1.0f);
+				mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+				mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+				mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+				mainPlaneTransform = glm::translate(mainPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+
+				mainPlaneTransform = MVP * mainPlaneTransform;
+				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &mainPlaneTransform[0][0]);
+
+				mainPlane->draw();
+			}
+		}
+		planeOpacity = getContentPlaneOpacity(1);
+		if (planeOpacity > 0.f) {
+			glUniform1f(Opacity_L, planeOpacity);
+
 			glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
 			glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
 
-			glCullFace(GL_BACK);
-
 			//transform and draw plane
-			glm::mat4 mainPlaneTransform = glm::mat4(1.0f);
-			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-			mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-			mainPlaneTransform = glm::translate(mainPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+			glm::mat4 secondaryPlaneTransform = glm::mat4(1.0f);
+			secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+			secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+			secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+			secondaryPlaneTransform = glm::translate(secondaryPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
 
-			mainPlaneTransform = MVP * mainPlaneTransform;
-			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &mainPlaneTransform[0][0]);
+			secondaryPlaneTransform = MVP * secondaryPlaneTransform;
+			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &secondaryPlaneTransform[0][0]);
 
-			mainPlane->draw();
+			secondaryPlane->draw();
 		}
-	}
-	planeOpacity = getContentPlaneOpacity(1);
-	if (planeOpacity > 0.f) {
-		glUniform1f(Opacity_L, planeOpacity);
-
-		glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
-		glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
-
-		//transform and draw plane
-		glm::mat4 secondaryPlaneTransform = glm::mat4(1.0f);
-		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-		secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-		secondaryPlaneTransform = glm::translate(secondaryPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
-
-		secondaryPlaneTransform = MVP * secondaryPlaneTransform;
-		glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &secondaryPlaneTransform[0][0]);
-
-		secondaryPlane->draw();
 	}
 
 	for (int i = 2; i < planeAttributes.getSize(); i++) {
@@ -525,6 +529,7 @@ void myDraw3DFun()
 
     sgct::ShaderManager::instance()->unBindShaderProgram();
 
+	glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
 }
@@ -547,9 +552,9 @@ void myDraw2DFun()
             captureRate.getVal());
     }
 
-	if (gEngine->isMaster())
+	if (gEngine->isMaster() && !screenshotPassOn)
 	{
-		ImGui_ImplGlfwGL3_NewFrame();
+		ImGui_ImplGlfwGL3_NewFrame(gEngine->getCurrentWindowPtr()->getXFramebufferResolution(), gEngine->getCurrentWindowPtr()->getYFramebufferResolution());
 
 		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Settings");
@@ -583,8 +588,10 @@ void myDraw2DFun()
 			ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
 			ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
 			ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
-			if (ImGui::CollapsingHeader("Advanced", 0, true, false))
-			{
+			if (ImGui::Button("Export Fisheye To Application Folder")) {
+				takeScreenshot = true;
+			}
+			if (ImGui::CollapsingHeader("Advanced", 0, true, false)) {
 				ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
 				ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
 				ImGui::SliderFloat("Chroma Key CutOff", &imChromaKeyCutOff, 0.f, 0.5f);
@@ -619,18 +626,21 @@ void myPreSyncFun()
             clientsUploadDone = false;
         }
     }
+
+	if (screenshotPassOn) {
+		screenshotPassOn = false;
+	}
 }
 
 void myPostSyncPreDrawFun()
 {
     gEngine->setDisplayInfoVisibility(info.getVal());
     gEngine->setStatsGraphVisibility(stats.getVal());
-    //gEngine->setWireframe(wireframe.getVal());
 
-    if (takeScreenshot.getVal())
-    {
+    if (takeScreenshot) {
         gEngine->takeScreenshot();
-        takeScreenshot.setVal(false);
+		takeScreenshot = false;
+		screenshotPassOn = true;
     }
 
     fulldomeMode = renderDome.getVal(); //set the flag frame synchronized for all viewports
@@ -830,6 +840,7 @@ void createCapturePlanes() {
 		contentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributes.getVal()[i].height));
 	}
 
+	//Reset re-creation
 	planeReCreate.setVal(false);
 }
 
@@ -915,8 +926,9 @@ void myInitOGLFun()
     sgct::ShaderManager::instance()->unBindShaderProgram();
 
 	// Setup ImGui binding
-	if (gEngine->isMaster())
+	if (gEngine->isMaster()) {
 		ImGui_ImplGlfwGL3_Init(gEngine->getCurrentWindowPtr()->getWindowHandle());
+	}
 
     sgct::Engine::checkForOGLErrors();
 }
@@ -926,15 +938,12 @@ void myEncodeFun()
     sgct::SharedData::instance()->writeDouble(&curr_time);
     sgct::SharedData::instance()->writeBool(&info);
     sgct::SharedData::instance()->writeBool(&stats);
-    sgct::SharedData::instance()->writeBool(&wireframe);
 
 	if (numSyncedTex > 0) {
 		domeTexIndex.setVal(imagePathsMap[domeImageFileNames[currentDomeTexIdx]]);
 	}
 	sgct::SharedData::instance()->writeInt32(&domeTexIndex);
 
-    sgct::SharedData::instance()->writeInt32(&incrIndex);
-    sgct::SharedData::instance()->writeBool(&takeScreenshot);
     sgct::SharedData::instance()->writeBool(&renderDome);
     sgct::SharedData::instance()->writeInt32(&domeCut);
 	fadingTime.setVal(imFadingTime);
@@ -985,10 +994,7 @@ void myDecodeFun()
     sgct::SharedData::instance()->readDouble(&curr_time);
     sgct::SharedData::instance()->readBool(&info);
     sgct::SharedData::instance()->readBool(&stats);
-    sgct::SharedData::instance()->readBool(&wireframe);
     sgct::SharedData::instance()->readInt32(&domeTexIndex);
-    sgct::SharedData::instance()->readInt32(&incrIndex);
-    sgct::SharedData::instance()->readBool(&takeScreenshot);
     sgct::SharedData::instance()->readBool(&renderDome);
     sgct::SharedData::instance()->readInt32(&domeCut);
 	sgct::SharedData::instance()->readFloat(&fadingTime);
@@ -1057,16 +1063,6 @@ void myKeyCallback(int key, int action)
 		case SGCT_KEY_I:
 			if (action == SGCT_PRESS)
 				info.toggle();
-			break;
-
-		case SGCT_KEY_W:
-			if (action == SGCT_PRESS)
-				wireframe.toggle();
-			break;
-
-		case SGCT_KEY_F:
-			if (action == SGCT_PRESS)
-				wireframe.toggle();
 			break;
 
 		case SGCT_KEY_1:

@@ -4,13 +4,14 @@
 		<Display swapInterval="1" refreshRate="60" />
 	</Settings>
 	<Node address="172.19.1.10" port="20400" swapLock="false" dataTransferPort="20500">
-		<Window fullScreen="false" numberOfSamples="4">
+		<Window fullScreen="false" msaa="4">
 			<Stereo type="none" />
-			<Size x="512" y="512" />
+			<Size x="1024" y="1024" />
+            <Res x="4096" y="4096" />
 			<Viewport name="fisheye">
 				<Pos x="0.0" y="0.0" />
 				<Size x="1.0" y="1.0" />
-				<FisheyeProjection fov="180" quality="medium" tilt="27.0">
+				<FisheyeProjection fov="180" quality="4k" tilt="0.0">
 					<Background r="0.1" g="0.1" b="0.1" a="1.0" />
 				</FisheyeProjection>
 			</Viewport>
@@ -102,6 +103,7 @@
 			</Viewport>
 		</Window>
 	</Node>
+    <Capture path="C:/Users/Public/Desktop/ImPres" />
 	<User eyeSeparation="0.065">
 		<Pos x="0.0" y="0.0" z="0.0" />
 	</User>

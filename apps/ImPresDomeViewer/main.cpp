@@ -111,6 +111,7 @@ void myDropCallback(int count, const char** paths);
 void myDataTransferDecoder(void * receivedData, int receivedlength, int packageId, int clientIndex);
 void myDataTransferStatus(bool connected, int clientIndex);
 void myDataTransferAcknowledge(int packageId, int clientIndex);
+void transferSupportedFiles(std::string pathStr);
 void startDataTransfer();
 void readImage(unsigned char * data, int len);
 void uploadTexture();
@@ -133,6 +134,7 @@ std::vector<std::pair<std::string, int>> imagePathsVec;
 std::map<std::string, int> imagePathsMap;
 std::vector<std::string> domeImageFileNames;
 std::vector<std::string> planeImageFileNames;
+std::string defaultFisheye = "";
 
 sgct::SharedBool running(true);
 sgct::SharedInt32 lastPackage(-1);
@@ -206,7 +208,7 @@ int imPlaneMaterialAspect = 169;
 bool imPlaneUseCaptureSize = false;
 float imPlaneHeight = 4.0f;
 float imPlaneAzimuth = 0.0f;
-float imPlaneElevation = 38.0f;
+float imPlaneElevation = 39.75f;
 float imPlaneRoll = 0.0f;
 bool imPlaneShow = true;
 int imPlaneImageIdx = 0;
@@ -518,7 +520,7 @@ void myDraw3DFun()
 			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
 			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
 			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-			contentPlaneTransform = glm::translate(contentPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+			contentPlaneTransform = glm::translate(contentPlaneTransform, glm::vec3(0.0f, 0.0f, -5.5f)); //distance
 
 			contentPlaneTransform = MVP * contentPlaneTransform;
 			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &contentPlaneTransform[0][0]);
@@ -565,15 +567,19 @@ void myDraw2DFun()
 		if (ImGui::CollapsingHeader("Flat Content", 0, true, true))
 		{
 			if (!imPlaneUseCaptureSize) {
+				ImGui::PushID("ScreenAspect");
 				ImGui::RadioButton("16:10", &imPlaneScreenAspect, 1610); ImGui::SameLine();
 				ImGui::RadioButton("16:9", &imPlaneScreenAspect, 169); ImGui::SameLine();
 				ImGui::RadioButton("5:4", &imPlaneScreenAspect, 54); ImGui::SameLine();
 				ImGui::RadioButton("4:3", &imPlaneScreenAspect, 43); ImGui::SameLine();
+				ImGui::PopID();
 				ImGui::Text("  -  Capture Screen Aspect Ratio");
-				ImGui::RadioButton("16;10", &imPlaneMaterialAspect, 1610); ImGui::SameLine();
-				ImGui::RadioButton("16;9", &imPlaneMaterialAspect, 169); ImGui::SameLine();
-				ImGui::RadioButton("5;4", &imPlaneMaterialAspect, 54); ImGui::SameLine();
-				ImGui::RadioButton("4;3", &imPlaneMaterialAspect, 43); ImGui::SameLine();
+				ImGui::PushID("MaterialAspect");
+				ImGui::RadioButton("16:10", &imPlaneMaterialAspect, 1610); ImGui::SameLine();
+				ImGui::RadioButton("16:9", &imPlaneMaterialAspect, 169); ImGui::SameLine();
+				ImGui::RadioButton("5:4", &imPlaneMaterialAspect, 54); ImGui::SameLine();
+				ImGui::RadioButton("4:3", &imPlaneMaterialAspect, 43); ImGui::SameLine();
+				ImGui::PopID();
 				ImGui::Text("  -  Capture Material Aspect Ratio");
 			}
 			ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
@@ -865,11 +871,20 @@ void myInitOGLFun()
 	imPlanes.push_back("Main Capture Plane");
 	imPlanes.push_back("Seconday Capture Plane");
 	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll));
-	planeAttributes.addVal(ContentPlane(2.5f, -140.f, 20.f, imPlaneRoll));
+	planeAttributes.addVal(ContentPlane(1.8f, -160.f, 20.f, imPlaneRoll));
 	planeImageFileNames.push_back("Capture Card");
+
+	//define default content plane
+	//imPlanes.push_back("Content 1");
+	//planeAttributes.addVal(ContentPlane(1.75f, 0.f, 38.824f, 0.f));
 
     //create plane
 	createCapturePlanes();
+
+	//load default fisheye if specified
+	if (!defaultFisheye.empty()) {
+		transferSupportedFiles(defaultFisheye);
+	}
 
     //create dome
     dome = new sgct_utils::SGCTDome(7.4f, 180.0f, 256, 128);
@@ -928,6 +943,29 @@ void myInitOGLFun()
 	// Setup ImGui binding
 	if (gEngine->isMaster()) {
 		ImGui_ImplGlfwGL3_Init(gEngine->getCurrentWindowPtr()->getWindowHandle());
+
+		ImGuiStyle& style = ImGui::GetStyle();
+		style.IndentSpacing = 25;
+		style.ItemSpacing = { 4.f, 2.f };
+		style.Colors[ImGuiCol_Border] = ImVec4(0.1f, 0.39f, 0.42f, 0.59f);
+		style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+		style.Colors[ImGuiCol_TitleBg] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
+		style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
+		style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
+		style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.12f, 0.71f, 0.8f, 0.43f);
+		style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.4f, 0.75f, 0.8f, 0.65f);
+		style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.4f, 0.75f, 0.8f, 0.65f);
+		style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(0.5f, 0.8f, 0.76f, 1.0f);
+		style.Colors[ImGuiCol_Button] = ImVec4(0.0f, 0.36f, 0.67f, 0.6f);
+		style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.0f, 0.51f, 0.94f, 1.0f);
+		style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.0f, 0.43f, 0.8f, 1.0f);
+		style.Colors[ImGuiCol_Header] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
+		style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
+		style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
+		style.Colors[ImGuiCol_ResizeGrip] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+		style.Colors[ImGuiCol_CloseButton] = ImVec4(0.75f, 0.75f, 0.75f, 1.0f);
+		style.Colors[ImGuiCol_CloseButtonHovered] = ImVec4(0.52f, 0.52f, 0.52f, 0.6f);
+		style.Colors[ImGuiCol_CloseButtonActive] = ImVec4(0.52f, 0.52f, 0.52f, 1.0f);
 	}
 
     sgct::Engine::checkForOGLErrors();
@@ -1407,30 +1445,33 @@ void myDropCallback(int count, const char** paths)
         //iterate all drop paths
         for (int i = 0; i < pathStrings.size(); i++)
         {
-            std::string tmpStr = pathStrings[i];
-
-            //find and add supported file type
-  			bool found = false;
-			int type = 0;
-			if (tmpStr.find(".jpg") != std::string::npos || tmpStr.find(".jpeg") != std::string::npos) {
-				type = IM_JPEG;
-				found = true;
-			}
-			else if (tmpStr.find(".png") != std::string::npos) {
-				type = IM_PNG;
-				found = true;
-			}
-			if (found) {
-				imagePathsVec.push_back(std::pair<std::string, int>(pathStrings[i], type));
-				std::string fileName = getFileName(pathStrings[i]);
-				imagePathsMap.insert(std::pair<std::string, int>(fileName, static_cast<int>(imagePathsVec.size()-1)));
-				domeImageFileNames.push_back(fileName);
-				planeImageFileNames.push_back(fileName);
-				transfer.setVal(true); //tell transfer thread to start processing data
-				serverUploadCount++;
-			}
+			//find and add supported file type
+			transferSupportedFiles(pathStrings[i]);
         }
     }
+}
+
+void transferSupportedFiles(std::string pathStr) {
+	//find and add supported file type
+	bool found = false;
+	int type = 0;
+	if (pathStr.find(".jpg") != std::string::npos || pathStr.find(".jpeg") != std::string::npos) {
+		type = IM_JPEG;
+		found = true;
+	}
+	else if (pathStr.find(".png") != std::string::npos) {
+		type = IM_PNG;
+		found = true;
+	}
+	if (found) {
+		imagePathsVec.push_back(std::pair<std::string, int>(pathStr, type));
+		std::string fileName = getFileName(pathStr);
+		imagePathsMap.insert(std::pair<std::string, int>(fileName, static_cast<int>(imagePathsVec.size() - 1)));
+		domeImageFileNames.push_back(fileName);
+		planeImageFileNames.push_back(fileName);
+		transfer.setVal(true); //tell transfer thread to start processing data
+		serverUploadCount++;
+	}
 }
 
 void parseArguments(int& argc, char**& argv)
@@ -1455,6 +1496,10 @@ void parseArguments(int& argc, char**& argv)
         {
             flipFrame = true;
         }
+		else if (strcmp(argv[i], "-defaultfisheye") == 0)
+		{
+			defaultFisheye = std::string(argv[i + 1]);
+		}
         /*else if (strcmp(argv[i], "-plane") == 0 && argc > (i + 3))
         {
             planeAzimuth = static_cast<float>(atof(argv[i + 1]));

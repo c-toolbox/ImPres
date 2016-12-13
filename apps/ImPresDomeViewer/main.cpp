@@ -135,6 +135,7 @@ std::map<std::string, int> imagePathsMap;
 std::vector<std::string> domeImageFileNames;
 std::vector<std::string> planeImageFileNames;
 std::string defaultFisheye = "";
+double defaultFisheyeDelay = 0.0;
 
 sgct::SharedBool running(true);
 sgct::SharedInt32 lastPackage(-1);
@@ -206,11 +207,11 @@ int imPlanePreviousIdx = 0;
 int imPlaneScreenAspect = 1610;
 int imPlaneMaterialAspect = 169;
 bool imPlaneUseCaptureSize = false;
-float imPlaneHeight = 4.0f;
+float imPlaneHeight = 3.5f;
 float imPlaneAzimuth = 0.0f;
-float imPlaneElevation = 39.75f;
+float imPlaneElevation = 35.0f;
 float imPlaneRoll = 0.0f;
-bool imPlaneShow = true;
+bool imPlaneShow = false;
 int imPlaneImageIdx = 0;
 float imFadingTime = 2.0f;
 bool imChromaKey = false;
@@ -585,7 +586,7 @@ void myDraw2DFun()
 			ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
 			if (ImGui::Button("Add New Plane")) {
 				imPlanes.push_back("Content " + std::to_string((imPlanes.size() - 1)));
-				planeAttributes.addVal(ContentPlane(3.0f, 0.f, 90.f, 0.f));
+				planeAttributes.addVal(ContentPlane(1.6f, 0.f, 85.f, 0.f));
 			}
 			ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
 			ImGui::Checkbox("Show Plane", &imPlaneShow);
@@ -631,6 +632,22 @@ void myPreSyncFun()
             serverUploadDone = false;
             clientsUploadDone = false;
         }
+
+		//load default fisheyes if specified
+		if (!defaultFisheye.empty()) {
+			sgct::Engine::sleep(defaultFisheyeDelay);
+			std::string delim = ";";
+			size_t start = 0U;
+			size_t end = defaultFisheye.find(delim);
+			while (end != std::string::npos)
+			{
+				transferSupportedFiles(defaultFisheye.substr(start, end - start));
+				start = end + delim.length();
+				end = defaultFisheye.find(delim, start);
+			}
+			transferSupportedFiles(defaultFisheye.substr(start, end));
+			defaultFisheye = "";
+		}
     }
 
 	if (screenshotPassOn) {
@@ -870,21 +887,16 @@ void myInitOGLFun()
 	//define main and secondary planes
 	imPlanes.push_back("Main Capture Plane");
 	imPlanes.push_back("Seconday Capture Plane");
-	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll));
-	planeAttributes.addVal(ContentPlane(1.8f, -160.f, 20.f, imPlaneRoll));
+	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, false));
+	planeAttributes.addVal(ContentPlane(1.8f, -155.f, 20.f, imPlaneRoll, false));
 	planeImageFileNames.push_back("Capture Card");
 
 	//define default content plane
 	//imPlanes.push_back("Content 1");
-	//planeAttributes.addVal(ContentPlane(1.75f, 0.f, 38.824f, 0.f));
+	//planeAttributes.addVal(ContentPlane(1.6f, 0.f, 95.0f, 0.f));
 
     //create plane
 	createCapturePlanes();
-
-	//load default fisheye if specified
-	if (!defaultFisheye.empty()) {
-		transferSupportedFiles(defaultFisheye);
-	}
 
     //create dome
     dome = new sgct_utils::SGCTDome(7.4f, 180.0f, 256, 128);
@@ -1499,6 +1511,10 @@ void parseArguments(int& argc, char**& argv)
 		else if (strcmp(argv[i], "-defaultfisheye") == 0)
 		{
 			defaultFisheye = std::string(argv[i + 1]);
+		}
+		else if (strcmp(argv[i], "-defaultfisheyedelay") == 0)
+		{
+			defaultFisheyeDelay = std::stod(std::string(argv[i + 1]).c_str());
 		}
         /*else if (strcmp(argv[i], "-plane") == 0 && argc > (i + 3))
         {

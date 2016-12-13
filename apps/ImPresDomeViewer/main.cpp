@@ -277,7 +277,8 @@ int main( int argc, char* argv[] )
     // Main loop
     gEngine->render();
 
-	stopCapture();
+	if(captureRunning.getVal())
+		stopCapture();
 
     running.setVal(false);
     if (loadThread)
@@ -423,7 +424,6 @@ void myDraw3DFun()
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	float planeOpacity;
 
 	//No capture planes when taking screenshot
 	if (!screenshotPassOn) {
@@ -435,12 +435,23 @@ void myDraw3DFun()
 			glBindTexture(GL_TEXTURE_2D, captureTexId);
 		}
 
-
 		glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
 
-		planeOpacity = getContentPlaneOpacity(0);
-		if (planeOpacity > 0.f) {
-			glUniform1f(Opacity_L, planeOpacity);
+		float mainPlaneOpacity = getContentPlaneOpacity(0);
+		float secplaneOpacity = getContentPlaneOpacity(1);
+
+		bool renderMainPlane = (mainPlaneOpacity > 0.f);
+		bool renderSecPlane = (secplaneOpacity > 0.f);
+
+		//stop or start capture depending on capture plane visibility
+		bool captureStarted = captureRunning.getVal();
+		if (captureStarted && !renderMainPlane && !renderSecPlane)
+			stopCapture();
+		else if (!captureStarted && (renderMainPlane || renderSecPlane))
+			startCapture();
+
+		if (renderMainPlane) {
+			glUniform1f(Opacity_L, mainPlaneOpacity);
 
 			if (fulldomeMode)
 			{
@@ -479,9 +490,9 @@ void myDraw3DFun()
 				mainPlane->draw();
 			}
 		}
-		planeOpacity = getContentPlaneOpacity(1);
-		if (planeOpacity > 0.f) {
-			glUniform1f(Opacity_L, planeOpacity);
+
+		if (renderSecPlane) {
+			glUniform1f(Opacity_L, secplaneOpacity);
 
 			glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
 			glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
@@ -500,6 +511,7 @@ void myDraw3DFun()
 		}
 	}
 
+	float planeOpacity;
 	for (int i = 2; i < planeAttributes.getSize(); i++) {
 		planeOpacity = getContentPlaneOpacity(i);
 		if (planeOpacity > 0.f && contentPlanes.size() > i-2) {

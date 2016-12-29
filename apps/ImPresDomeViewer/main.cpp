@@ -136,6 +136,7 @@ std::vector<std::string> domeImageFileNames;
 std::vector<std::string> planeImageFileNames;
 std::string defaultFisheye = "";
 double defaultFisheyeDelay = 0.0;
+double defaultFisheyeTime = 0.0;
 
 sgct::SharedBool running(true);
 sgct::SharedInt32 lastPackage(-1);
@@ -647,18 +648,23 @@ void myPreSyncFun()
 
 		//load default fisheyes if specified
 		if (!defaultFisheye.empty()) {
-			sgct::Engine::sleep(defaultFisheyeDelay);
-			std::string delim = ";";
-			size_t start = 0U;
-			size_t end = defaultFisheye.find(delim);
-			while (end != std::string::npos)
-			{
-				transferSupportedFiles(defaultFisheye.substr(start, end - start));
-				start = end + delim.length();
-				end = defaultFisheye.find(delim, start);
+			if (defaultFisheyeTime == 0) {
+				defaultFisheyeTime = curr_time.getVal() + defaultFisheyeDelay;
 			}
-			transferSupportedFiles(defaultFisheye.substr(start, end));
-			defaultFisheye = "";
+			else if (curr_time.getVal() > defaultFisheyeTime) {
+				//sgct::Engine::sleep(defaultFisheyeDelay);
+				std::string delim = ";";
+				size_t start = 0U;
+				size_t end = defaultFisheye.find(delim);
+				while (end != std::string::npos)
+				{
+					transferSupportedFiles(defaultFisheye.substr(start, end - start));
+					start = end + delim.length();
+					end = defaultFisheye.find(delim, start);
+				}
+				transferSupportedFiles(defaultFisheye.substr(start, end));
+				defaultFisheye = "";
+			}	
 		}
     }
 

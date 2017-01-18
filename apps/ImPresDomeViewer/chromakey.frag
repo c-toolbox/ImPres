@@ -5,30 +5,53 @@ uniform vec2 scaleUV;
 uniform vec2 offsetUV;
 
 uniform vec3 chromaKeyColor;
-uniform float chromaKeyCutOff;
-uniform float chromaKeyThresholdSensitivity;
-uniform float chromaKeySmoothing;
 uniform float opacity;
 
 in vec2 UV;
-out vec4 color;
+out vec4 fragColor;
+
+vec3 rgb2hsv(vec3 rgb)
+{
+	float Cmax = max(rgb.r, max(rgb.g, rgb.b));
+	float Cmin = min(rgb.r, min(rgb.g, rgb.b));
+    float delta = Cmax - Cmin;
+
+	vec3 hsv = vec3(0., 0., Cmax);
+	
+	if (Cmax > Cmin)
+	{
+		hsv.y = delta / Cmax;
+
+		if (rgb.r == Cmax)
+			hsv.x = (rgb.g - rgb.b) / delta;
+		else
+		{
+			if (rgb.g == Cmax)
+				hsv.x = 2. + (rgb.b - rgb.r) / delta;
+			else
+				hsv.x = 4. + (rgb.r - rgb.g) / delta;
+		}
+		hsv.x = fract(hsv.x / 6.);
+	}
+	return hsv;
+}
+
+float chromaKey(vec3 color)
+{
+	vec3 weights = vec3(4., 1., 2.);
+	vec3 hsv = rgb2hsv(color);
+	vec3 target = rgb2hsv(chromaKeyColor);
+	float dist = length(weights * (target - hsv));
+	return 1. - clamp(3. * dist - 1.5, 0., 1.);
+}
 
 void main()
 {
-    vec4 texColor = texture(Tex, (UV.st * scaleUV) + offsetUV);
-     
-    float maskY = 0.2989 * chromaKeyColor.r + 0.5866 * chromaKeyColor.g + 0.1145 * chromaKeyColor.b;
-    float maskCr = 0.7132 * (chromaKeyColor.r - maskY);
-    float maskCb = 0.5647 * (chromaKeyColor.b - maskY);
-     
-    float Y = 0.2989 * texColor.r + 0.5866 * texColor.g + 0.1145 * texColor.b;
-    float Cr = 0.7132 * (texColor.r - Y);
-    float Cb = 0.5647 * (texColor.b - Y);
-     
-    float blendValue = smoothstep(chromaKeyThresholdSensitivity, chromaKeyThresholdSensitivity + chromaKeySmoothing, distance(vec2(Cr, Cb), vec2(maskCr, maskCb)));
-    if(blendValue > chromaKeyCutOff){
-        color = vec4(texColor.rgb, texColor.a * blendValue * opacity);
-	}
-    else
-        discard;
+    vec4 color = texture(Tex, (UV.st * scaleUV) + offsetUV);
+	
+	float incrustation = chromaKey(color.rgb);
+	
+	color = mix(color, vec4(0.0), incrustation);
+
+	fragColor = color;
 }

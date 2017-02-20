@@ -134,7 +134,7 @@ std::vector<std::pair<std::string, int>> imagePathsVec;
 std::map<std::string, int> imagePathsMap;
 std::vector<std::string> domeImageFileNames;
 std::vector<std::string> planeImageFileNames;
-std::string defaultFisheye = "";
+std::vector<std::string> defaultFisheyes;
 double defaultFisheyeDelay = 0.0;
 double defaultFisheyeTime = 0.0;
 
@@ -187,6 +187,7 @@ glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
 
 sgct::SharedBool captureRunning(true);
+sgct::SharedInt captureLockStatus(0);
 sgct::SharedBool renderDome(fulldomeMode);
 sgct::SharedDouble captureRate(0.0);
 sgct::SharedInt32 domeCut(2);
@@ -349,7 +350,7 @@ void myDraw3DFun()
     //Set up backface culling
     glCullFace(GL_BACK);
 
-    if (domeTexIndex.getVal() != -1)
+    if (domeTexIndex.getVal() != -1 && texIds.getSize() > domeTexIndex.getVal())
     {
 		float mix = -1;
 		if (previousDomeTexIndex != domeTexIndex.getVal() && domeBlendStartTime == -1.0) {
@@ -437,10 +438,12 @@ void myDraw3DFun()
 
 		//stop or start capture depending on capture plane visibility
 		bool captureStarted = captureRunning.getVal();
-		if (captureStarted && !renderMainPlane && !renderSecPlane)
+		if (captureStarted && !renderMainPlane && !renderSecPlane) {
 			stopCapture();
-		else if (!captureStarted && (renderMainPlane || renderSecPlane))
+		}
+		else if (!captureStarted && captureLockStatus.getVal() == 0 && (renderMainPlane || renderSecPlane)) {
 			startCapture();
+		}
 
 		if (renderMainPlane) {
 			glUniform1f(Opacity_L, mainPlaneOpacity);
@@ -618,7 +621,25 @@ void myPreSyncFun()
     if( gEngine->isMaster() )
     {
         curr_time.setVal( sgct::Engine::getTime() );
-        
+
+		//load one default fisheye at certain intervals, if their are any
+		if (!defaultFisheyes.empty()) {
+			if (defaultFisheyeTime == 0) {
+				defaultFisheyeTime = curr_time.getVal() + defaultFisheyeDelay;
+			}
+			else if (curr_time.getVal() > defaultFisheyeTime) {
+				serverUploadCount.setVal(0);
+				transferSupportedFiles(defaultFisheyes.at(0));
+				defaultFisheyes.erase(defaultFisheyes.begin());
+				/*for each (std::string defaultFisheye in defaultFisheyes) {
+					transferSupportedFiles(defaultFisheye);
+				}
+				defaultFisheyes.clear();*/
+				defaultFisheyeTime = 0;
+
+			}
+		}
+
         //if texture is uploaded then iterate the index
         if (serverUploadDone.getVal() && clientsUploadDone.getVal())
         {
@@ -633,27 +654,6 @@ void myPreSyncFun()
             serverUploadDone = false;
             clientsUploadDone = false;
         }
-
-		//load default fisheyes if specified
-		if (!defaultFisheye.empty()) {
-			if (defaultFisheyeTime == 0) {
-				defaultFisheyeTime = curr_time.getVal() + defaultFisheyeDelay;
-			}
-			else if (curr_time.getVal() > defaultFisheyeTime) {
-				//sgct::Engine::sleep(defaultFisheyeDelay);
-				std::string delim = ";";
-				size_t start = 0U;
-				size_t end = defaultFisheye.find(delim);
-				while (end != std::string::npos)
-				{
-					transferSupportedFiles(defaultFisheye.substr(start, end - start));
-					start = end + delim.length();
-					end = defaultFisheye.find(delim, start);
-				}
-				transferSupportedFiles(defaultFisheye.substr(start, end));
-				defaultFisheye = "";
-			}	
-		}
     }
 
 	if (screenshotPassOn) {
@@ -1197,16 +1197,20 @@ void myDataTransferDecoder(void * receivedData, int receivedlength, int packageI
 
 	//stop capture
 	bool captureStarted = captureRunning.getVal();
-	if (captureStarted)
+	if (captureStarted) {
 		stopCapture();
+		captureLockStatus.setVal(captureLockStatus.getVal() + 1);
+	}
     
     //read the image on slave
     readImage( reinterpret_cast<unsigned char*>(receivedData), receivedlength);
     uploadTexture();
 
 	//start capture
-	if (captureStarted)
+	if (captureStarted) {
 		startCapture();
+		captureLockStatus.setVal(captureLockStatus.getVal() - 1);
+	}
 }
 
 void myDataTransferStatus(bool connected, int clientIndex)
@@ -1241,8 +1245,10 @@ void threadWorker(void *arg)
         {
 			//stop capture
 			bool captureStarted = captureRunning.getVal();
-			if (captureStarted)
+			if (captureStarted) {
 				stopCapture();
+				captureLockStatus.setVal(captureLockStatus.getVal() + 1);
+			}
 
             startDataTransfer();
             transfer.setVal(false);
@@ -1257,8 +1263,10 @@ void threadWorker(void *arg)
             }
 
 			//start capture
-			if (captureStarted)
+			if (captureStarted) {
 				startCapture();
+				captureLockStatus.setVal(captureLockStatus.getVal() - 1);
+			}
         }
 
         sgct::Engine::sleep(0.1); //ten iteration per second
@@ -1507,7 +1515,17 @@ void parseArguments(int& argc, char**& argv)
         }
 		else if (strcmp(argv[i], "-defaultfisheye") == 0)
 		{
-			defaultFisheye = std::string(argv[i + 1]);
+			std::string defaultFisheye = std::string(argv[i + 1]);
+			std::string delim = ";";
+			size_t start = 0U;
+			size_t end = defaultFisheye.find(delim);
+			while (end != std::string::npos)
+			{
+				defaultFisheyes.push_back(defaultFisheye.substr(start, end - start));
+				start = end + delim.length();
+				end = defaultFisheye.find(delim, start);
+			}
+			defaultFisheyes.push_back(defaultFisheye.substr(start, end));
 		}
 		else if (strcmp(argv[i], "-defaultfisheyedelay") == 0)
 		{

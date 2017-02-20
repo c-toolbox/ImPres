@@ -57,6 +57,20 @@ if(NOT IMGUI_INCLUDE_DIRECTORY)
     endif()
 endif()
 
+option(USE_ZXING "Use ZXING to enable QR decoding and more" OFF)
+if(USE_ZXING)
+	find_package(ZXing REQUIRED)
+
+	if(ZXING_FOUND)
+		add_definitions(-DZXING_ENABLED)
+	endif()
+	set(IMPRES_ZXING_SRC BGR24LuminanceSource.h BGR24LuminanceSource.cpp)
+else()
+	set(ZXING_INCLUDE_DIRECTORY "")
+	set(ZXING_LIBRARY "")
+	set(IMPRES_ZXING_SRC "")
+endif()
+
 add_executable(${APP_NAME}
 	main.cpp
 	Capture.cpp
@@ -68,7 +82,9 @@ add_executable(${APP_NAME}
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_demo.cpp
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_draw.cpp
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.h
-    ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.cpp)
+    ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.cpp
+	${IMPRES_ZXING_SRC}	
+)
 
 #copy data
 file(GLOB files
@@ -134,7 +150,7 @@ set(FFMPEG_INCLUDES
 	${FFMPEG_LIBSWSCALE_INCLUDE_DIRS}
 	${FFMPEG_LIBAVRESAMPLE_INCLUDE_DIRS})
 
-include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${IMGUI_INCLUDE_DIRECTORY})
+include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY})
 
 set(FFMPEG_LIBS
 	${FFMPEG_LIBAVCODEC_LIBRARIES}
@@ -150,6 +166,7 @@ if( MSVC )
 		${OPENGL_gl_LIBRARY}
 		ws2_32
 		${FFMPEG_LIBS}
+		${ZXING_LIBRARY}
 	)
 elseif( WIN32 ) #MINGW or similar
 	set(LIBS
@@ -157,6 +174,7 @@ elseif( WIN32 ) #MINGW or similar
 		${OPENGL_gl_LIBRARY}
 		ws2_32
 		${FFMPEG_LIBS}
+		${ZXING_LIBRARY}
 	)
 elseif( APPLE )
 	find_library(COCOA_LIBRARY Cocoa REQUIRED)
@@ -170,6 +188,7 @@ elseif( APPLE )
 		${IOKIT_LIBRARY}
 		${COREVIDEO_LIBRARY}
 		${FFMPEG_LIBS}
+		${ZXING_LIBRARY}
 	)
 else() #linux
 	find_package(X11 REQUIRED)
@@ -185,7 +204,8 @@ else() #linux
 		${X11_Xxf86vm_LIB}
 		${X11_Xcursor_LIB}
 		${CMAKE_THREAD_LIBS_INIT}
-		${FFMPEG_LIBS}		
+		${FFMPEG_LIBS}
+		${ZXING_LIBRARY}		
 	)
 endif()
 

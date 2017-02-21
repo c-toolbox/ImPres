@@ -1626,9 +1626,9 @@ void uploadData(uint8_t ** data, int width, int height)
         }
 
 #ifdef ZXING_ENABLED
-		std::string decodeResult = QRCodeInterpreter::decodeImage(BGR24LuminanceSource::create(data[0], width, height));
+		std::string decodeResult = QRCodeInterpreter::decodeImage(BGR24LuminanceSource::create(data, width, height));
 		if(!decodeResult.empty())
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodeResult.size(), decodeResult);
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodeResult.size(), decodeResult.c_str());
 #endif
 
         calculateStats();

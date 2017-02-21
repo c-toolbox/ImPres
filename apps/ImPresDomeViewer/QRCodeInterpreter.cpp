@@ -54,30 +54,24 @@ std::string QRCodeInterpreter::decodeImage(Ref<LuminanceSource> source, bool pri
 		Ref<Reader> reader(new QRCodeReader);
 		
 		Ref<Result> result = reader->decode(binary, hints);
-		
-		Ref<String> resultText = result->getText();
 
-		/*std::string resultStr = "";
-		for(int i=0; i < resultText->size(); ++i)
-			resultStr.push_back(resultText->charAt(i));*/
-
-		return resultText->getText();
+		return result->getText()->getText();
 	}
 	catch (const ReaderException& e) {
 		if(print_exceptions)
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::ReaderException: %s\n", std::string(e.what()));
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::ReaderException: %s\n", e.what());
 	}
 	catch (const zxing::IllegalArgumentException& e) {
 		if (print_exceptions)
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::IllegalArgumentException: %s\n", std::string(e.what()));
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::IllegalArgumentException: %s\n", e.what());
 	}
 	catch (const zxing::Exception& e) {
 		if (print_exceptions)
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::Exception: %s\n", std::string(e.what()));
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::Exception: %s\n", e.what());
 	}
 	catch (const std::exception& e) {
 		if (print_exceptions)
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "std::exception: %s\n", std::string(e.what()));
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "std::exception: %s\n", e.what());
 	}
 
 	return "";

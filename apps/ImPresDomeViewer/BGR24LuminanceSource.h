@@ -25,7 +25,7 @@ class BGR24LuminanceSource : public zxing::LuminanceSource {
 public:
   BGR24LuminanceSource(zxing::ArrayRef<char> image, int width, int height);
 
-  static zxing::Ref<LuminanceSource> create(uint8_t* data, int width, int height);
+  static zxing::Ref<LuminanceSource> create(uint8_t** data, int width, int height);
 
   zxing::ArrayRef<char> getRow(int y, zxing::ArrayRef<char> row) const;
   zxing::ArrayRef<char> getMatrix() const;

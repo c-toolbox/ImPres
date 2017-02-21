@@ -37,9 +37,9 @@ inline char BGR24LuminanceSource::convertPixel(char const* pixel_) const {
 BGR24LuminanceSource::BGR24LuminanceSource(ArrayRef<char> image_, int width, int height)
     : Super(width, height), image(image_) {}
 
-Ref<LuminanceSource> BGR24LuminanceSource::create(uint8_t* data, int width, int height) {
+Ref<LuminanceSource> BGR24LuminanceSource::create(uint8_t** data, int width, int height) {
   zxing::ArrayRef<char> image = zxing::ArrayRef<char>(width * height * 3);
-  memcpy(&image[0], &data[0], image->size()*sizeof(uint8_t));
+  memcpy(&image[0], data[0], image->size()*sizeof(uint8_t));
   return Ref<LuminanceSource>(new BGR24LuminanceSource(image, width, height));
 }
 

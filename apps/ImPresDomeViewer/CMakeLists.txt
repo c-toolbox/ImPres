@@ -57,14 +57,18 @@ if(NOT IMGUI_INCLUDE_DIRECTORY)
     endif()
 endif()
 
-option(USE_ZXING "Use ZXING to enable QR decoding and more" OFF)
-if(USE_ZXING)
+option(ZXING_ENABLE "Use ZXING to enable QR decoding and more" OFF)
+if(ZXING_ENABLE)
 	find_package(ZXing REQUIRED)
 
 	if(ZXING_FOUND)
 		add_definitions(-DZXING_ENABLED)
 	endif()
-	set(IMPRES_ZXING_SRC BGR24LuminanceSource.h BGR24LuminanceSource.cpp)
+	set(IMPRES_ZXING_SRC 
+	BGR24LuminanceSource.h
+	BGR24LuminanceSource.cpp
+	QRCodeInterpreter.h
+	QRCodeInterpreter.cpp)
 else()
 	set(ZXING_INCLUDE_DIRECTORY "")
 	set(ZXING_LIBRARY "")

@@ -1,9 +1,9 @@
-#ifndef _BGR24_LUMINANCE_SOURCE_H_
-#define _BGR24_LUMINANCE_SOURCE_H_
+#ifndef _QR_CODE_INTERPRETER_H_
+#define _QR_CODE_INTERPRETER_H_
 /*
  *  Copyright 2017 Erik Sundén
  *
- *  Based on ImageReaderSource
+ *  Based on main.cpp in zxing/cli
  *  Copyright 2010-2011 ZXing authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,21 +21,9 @@
 
 #include <zxing/LuminanceSource.h>
 
-class BGR24LuminanceSource : public zxing::LuminanceSource {
+class QRCodeInterpreter {
 public:
-  BGR24LuminanceSource(zxing::ArrayRef<char> image, int width, int height);
-
-  static zxing::Ref<LuminanceSource> create(uint8_t* data, int width, int height);
-
-  zxing::ArrayRef<char> getRow(int y, zxing::ArrayRef<char> row) const;
-  zxing::ArrayRef<char> getMatrix() const;
-
-private:
-	typedef LuminanceSource Super;
-
-	const zxing::ArrayRef<char> image;
-
-	char convertPixel(const char* pixel) const;
+  static std::string decodeImage(zxing::Ref<zxing::LuminanceSource> source, bool print_exceptions = false, bool hybrid = false, bool tryhard = false);
 };
 
-#endif /* _BGR24_LUMINANCE_SOURCE_H_ */
+#endif /* _QR_CODE_INTERPRETER_H_ */

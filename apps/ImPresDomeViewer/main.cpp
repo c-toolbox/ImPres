@@ -21,6 +21,11 @@
 #include <sgct.h>
 #include "Capture.hpp"
 
+#ifdef ZXING_ENABLED
+#include "BGR24LuminanceSource.h"
+#include "QRCodeInterpreter.h"
+#endif
+
 #include <imgui.h>
 #include <imgui_impl_glfw_gl3.h>
 namespace ImGui
@@ -1619,6 +1624,12 @@ void uploadData(uint8_t ** data, int width, int height)
             glBindTexture(GL_TEXTURE_2D, captureTexId);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
         }
+
+#ifdef ZXING_ENABLED
+		std::string decodeResult = QRCodeInterpreter::decodeImage(BGR24LuminanceSource::create(data[0], width, height));
+		if(!decodeResult.empty())
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodeResult.size(), decodeResult);
+#endif
 
         calculateStats();
     }

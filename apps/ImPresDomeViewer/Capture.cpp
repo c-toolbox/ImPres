@@ -180,9 +180,6 @@ bool Capture::poll()
 	{
 		AVPacket orig_pkt = mPkt;
 
-		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Image data size: %u \n", getWidth() * getHeight() * 3);
-		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Package data size: %u \n", mPkt.size);
-
 		do
 		{
 			ret = decodePacket(&gotVideoFrame);

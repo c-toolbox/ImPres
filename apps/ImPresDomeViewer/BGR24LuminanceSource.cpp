@@ -18,48 +18,36 @@
 */
 
 #include "BGR24LuminanceSource.h"
-#include <zxing/common/IllegalArgumentException.h>
-#include <algorithm>
 
-using std::string;
-using std::ostringstream;
 using zxing::Ref;
 using zxing::ArrayRef;
 using zxing::LuminanceSource;
 
 inline char BGR24LuminanceSource::convertPixel(char const* pixel_) const {
   unsigned char const* pixel = (unsigned char const*)pixel_;
-  if (comps == 1 || comps == 2) {
-    // Gray or gray+alpha
-    return pixel[0];
-  } if (comps == 3 || comps == 4) {
-    // Red, Green, Blue, (Alpha)
-    // We assume 16 bit values here
-    // 0x200 = 1<<9, half an lsb of the result to force rounding
-    return (char)((306 * (int)pixel[0] + 601 * (int)pixel[1] +
-        117 * (int)pixel[2] + 0x200) >> 10);
-  } else {
-    throw zxing::IllegalArgumentException("Unexpected image depth");
-  }
+   // Blue, Green, Red
+   // We assume 16 bit values here
+   // 0x200 = 1<<9, half an lsb of the result to force rounding
+   return (char)((306 * (int)pixel[2] + 601 * (int)pixel[1] +
+        117 * (int)pixel[0] + 0x200) >> 10);
 }
 
-BGR24LuminanceSource::BGR24LuminanceSource(ArrayRef<char> image_, int width, int height, int comps_)
-    : Super(width, height), image(image_), comps(comps_) {}
+BGR24LuminanceSource::BGR24LuminanceSource(ArrayRef<char> image_, int width, int height)
+    : Super(width, height), image(image_) {}
 
 Ref<LuminanceSource> BGR24LuminanceSource::create(uint8_t* data, int width, int height) {
-  int comps = 3;
-  zxing::ArrayRef<char> image = zxing::ArrayRef<char>(comps * width * height);
+  zxing::ArrayRef<char> image = zxing::ArrayRef<char>(3 * width * height);
   memcpy(&image[0], &data[0], image->size());
-  return Ref<LuminanceSource>(new BGR24LuminanceSource(image, width, height, comps));
+  return Ref<LuminanceSource>(new BGR24LuminanceSource(image, width, height));
 }
 
 zxing::ArrayRef<char> BGR24LuminanceSource::getRow(int y, zxing::ArrayRef<char> row) const {
-  const char* pixelRow = &image[0] + y * getWidth() * 4;
+  const char* pixelRow = &image[0] + y * getWidth() * 3;
   if (!row) {
     row = zxing::ArrayRef<char>(getWidth());
   }
   for (int x = 0; x < getWidth(); x++) {
-    row[x] = convertPixel(pixelRow + (x * 4));
+    row[x] = convertPixel(pixelRow + (x * 3));
   }
   return row;
 }
@@ -72,7 +60,7 @@ zxing::ArrayRef<char> BGR24LuminanceSource::getMatrix() const {
     for (int x = 0; x < getWidth(); x++) {
       *m = convertPixel(p);
       m++;
-      p += 4;
+      p += 3;
     }
   }
   return matrix;

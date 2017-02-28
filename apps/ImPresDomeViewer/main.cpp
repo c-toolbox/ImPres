@@ -87,8 +87,8 @@ void myMouseButtonCallback(int button, int action);
 void myMouseScrollCallback(double xoffset, double yoffset);
 void myContextCreationCallback(GLFWwindow * win);
 
-std::vector<sgct_utils::SGCTPlane *> capturePlanes;
-std::vector<sgct_utils::SGCTPlane *> contentPlanes;
+std::vector<sgct_utils::SGCTPlane *> captureContentPlanes;
+std::vector<sgct_utils::SGCTPlane *> masterContentPlanes;
 sgct_utils::SGCTDome * dome = NULL;
 
 GLFWwindow * hiddenWindow;
@@ -437,26 +437,20 @@ void myDraw3DFun()
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+	//stop capture if necassary
+	bool captureStarted = captureRunning.getVal();
+	if (captureStarted && captureLockStatus.getVal() == 1) {
+		stopCapture();
+	}
+
 	//No capture planes when taking screenshot
 	if (!screenshotPassOn) {
-		glActiveTexture(GL_TEXTURE0);
-		if (planeAttributes.getVal()[0].planeStrId > 0) {
-			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[0].planeTexId));
-		}
-		else {
-			glBindTexture(GL_TEXTURE_2D, captureTexId);
-		}
-
-		glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
-
-		//stop capture if necassary
-		bool captureStarted = captureRunning.getVal();
-		if (captureStarted && captureLockStatus.getVal() == 1) {
-			stopCapture();
-		}
-
 		if (fulldomeMode)
 		{
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, captureTexId);
+			glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
+
 			glUniform1f(Opacity_L, 1.f);
 
 			// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
@@ -481,7 +475,15 @@ void myDraw3DFun()
 
 			glCullFace(GL_BACK);
 
-			for (int i = 0; i < capturePlanes.size(); i++) {
+			for (int i = 0; i < captureContentPlanes.size(); i++) {
+				glActiveTexture(GL_TEXTURE0);
+				if (planeAttributes.getVal()[i].planeStrId > 0) {
+					glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
+				}
+				else {
+					glBindTexture(GL_TEXTURE_2D, captureTexId);
+				}
+
 				float planeOpacity = getContentPlaneOpacity(i);
 				glUniform1f(Opacity_L, planeOpacity);
 
@@ -494,15 +496,15 @@ void myDraw3DFun()
 				capturePlaneTransform = MVP * capturePlaneTransform;
 				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &capturePlaneTransform[0][0]);
 
-				capturePlanes[i]->draw();
+				captureContentPlanes[i]->draw();
 			}
 		}
 	}
 
 	float planeOpacity;
-	for (int i = static_cast<int>(capturePlanes.size()); i < planeAttributes.getSize(); i++) {
+	for (int i = static_cast<int>(captureContentPlanes.size()); i < planeAttributes.getSize(); i++) {
 		planeOpacity = getContentPlaneOpacity(i);
-		if (planeOpacity > 0.f && contentPlanes.size() > i-capturePlanes.size()) {
+		if (planeOpacity > 0.f && masterContentPlanes.size() > i-captureContentPlanes.size()) {
 			glActiveTexture(GL_TEXTURE0);
 			if (planeAttributes.getVal()[i].planeStrId > 0) {
 				glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
@@ -526,7 +528,7 @@ void myDraw3DFun()
 			contentPlaneTransform = MVP * contentPlaneTransform;
 			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &contentPlaneTransform[0][0]);
 
-			contentPlanes[i- capturePlanes.size()]->draw();
+			masterContentPlanes[i- captureContentPlanes.size()]->draw();
 		}
 	}
 
@@ -694,11 +696,11 @@ void stopCapture()
 
 void createPlanes() {
 	//Capture planes
-	int capturePlaneSize = static_cast<int>(capturePlanes.size());
+	int capturePlaneSize = static_cast<int>(captureContentPlanes.size());
 	for (int i = 0; i < capturePlaneSize; i++) {
-		delete capturePlanes[i];
+		delete captureContentPlanes[i];
 	}
-	capturePlanes.clear();
+	captureContentPlanes.clear();
 
 	float captureRatio = (static_cast<float>(gCapture->getWidth()) / static_cast<float>(gCapture->getHeight()));
 
@@ -707,26 +709,26 @@ void createPlanes() {
 
 		if (planeUseCaptureSize.getVal())
 		{
-			capturePlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
+			captureContentPlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
 		}
 		else
 		{
 			switch (planeMaterialAspect.getVal())
 			{
 			case 1610:
-				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 10.0f) * 16.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 10.0f) * 16.0f, planeAttributes.getVal()[i].height));
 				break;
 			case 169:
-				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 9.0f) * 16.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 9.0f) * 16.0f, planeAttributes.getVal()[i].height));
 				break;
 			case 54:
-				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 4.0f) * 5.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 4.0f) * 5.0f, planeAttributes.getVal()[i].height));
 				break;
 			case 43:
-				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 3.0f) * 4.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 3.0f) * 4.0f, planeAttributes.getVal()[i].height));
 				break;
 			default:
-				capturePlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
 				break;
 			}
 		}
@@ -747,7 +749,7 @@ void createPlanes() {
 			case 169:
 				//16:10 -> 16:9
 				planeScaling = glm::vec2(1.0f, 0.90f);
-				planeOffset = glm::vec2(0.0f, 0.05f);
+				planeOffset = glm::vec2(0.01f, 0.05f);
 				break;
 			case 54:
 				//16:10 -> 5:4
@@ -762,7 +764,7 @@ void createPlanes() {
 			case 1610:
 			default:
 				planeScaling = glm::vec2(1.0f, 1.0f);
-				planeOffset = glm::vec2(0.0f, 0.0f);
+				planeOffset = glm::vec2(0.01f, 0.0f);
 				break;
 			}
 			break;
@@ -777,17 +779,17 @@ void createPlanes() {
 			case 54:
 				//16:9 -> 5:4
 				planeScaling = glm::vec2(1.0f, 270.0f / 384.0f);
-				planeOffset = glm::vec2(0.0f, 57.0f / 384.0f);
+				planeOffset = glm::vec2(0.01f, 57.0f / 384.0f);
 				break;
 			case 43:
 				//16:9 -> 4:3
 				planeScaling = glm::vec2(1.0f, 0.75f);
-				planeOffset = glm::vec2(0.0f, 0.125f);
+				planeOffset = glm::vec2(0.01f, 0.125f);
 				break;
 			case 169:
 			default:
 				planeScaling = glm::vec2(1.0f, 1.0f);
-				planeOffset = glm::vec2(0.0f, 0.0f);
+				planeOffset = glm::vec2(0.01f, 0.0f);
 				break;
 			}
 			break;
@@ -807,12 +809,12 @@ void createPlanes() {
 			case 43:
 				//5:4 -> 4:3
 				planeScaling = glm::vec2(1.0f, 0.9375f);
-				planeOffset = glm::vec2(0.0f, 0.03125f);
+				planeOffset = glm::vec2(0.01f, 0.03125f);
 				break;
 			case 54:
 			default:
 				planeScaling = glm::vec2(1.0f, 1.0f);
-				planeOffset = glm::vec2(0.0f, 0.0f);
+				planeOffset = glm::vec2(0.01f, 0.0f);
 				break;
 			}
 			break;
@@ -822,12 +824,12 @@ void createPlanes() {
 			case 1610:
 				//4:3 -> 16:10
 				planeScaling = glm::vec2(1.0f, 50.0f / 64.0f);
-				planeOffset = glm::vec2(0.0f, 7.0f / 64.0f);
+				planeOffset = glm::vec2(0.01f, 7.0f / 64.0f);
 				break;
 			case 169:
 				//4:3 -> 16:9
 				planeScaling = glm::vec2(1.0f, 0.75f);
-				planeOffset = glm::vec2(0.0f, 0.125f);
+				planeOffset = glm::vec2(0.01f, 0.125f);
 				break;
 			case 54:
 				//4:3 -> 5:4
@@ -837,26 +839,26 @@ void createPlanes() {
 			case 43:
 			default:
 				planeScaling = glm::vec2(1.0f, 1.0f);
-				planeOffset = glm::vec2(0.0f, 0.0f);
+				planeOffset = glm::vec2(0.01f, 0.0f);
 				break;
 			}
 			break;
 		default:
 			planeScaling = glm::vec2(1.0f, 1.0f);
-			planeOffset = glm::vec2(0.0f, 0.0f);
+			planeOffset = glm::vec2(0.01f, 0.0f);
 			break;
 		}
 	}
 
 	//Content planes
-	for (int i = 0; i < contentPlanes.size(); i++) {
-		delete contentPlanes[i];
+	for (int i = 0; i < masterContentPlanes.size(); i++) {
+		delete masterContentPlanes[i];
 	}
-	contentPlanes.clear();
+	masterContentPlanes.clear();
 
-	for (size_t i = capturePlanes.size(); i < planeAttributes.getSize(); i++) {
+	for (size_t i = captureContentPlanes.size(); i < planeAttributes.getSize(); i++) {
 		float width = planeAttributes.getVal()[i].height * texAspectRatio.getValAt(planeAttributes.getVal()[i].planeTexId);
-		contentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributes.getVal()[i].height));
+		masterContentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributes.getVal()[i].height));
 	}
 
 	//Reset re-creation
@@ -883,11 +885,11 @@ void myInitOGLFun()
 	//define capture planes
 	imPlanes.push_back("FrontCapture");
 	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, true));
-	capturePlanes.push_back(nullptr);
+	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("BackCapture");
 	planeAttributes.addVal(ContentPlane(1.8f, -155.f, 20.f, imPlaneRoll, false));
-	capturePlanes.push_back(nullptr);
+	captureContentPlanes.push_back(nullptr);
 
 	planeImageFileNames.push_back("Capture Card");
 
@@ -1059,16 +1061,16 @@ void myCleanUpFun()
         delete dome;
 
 	//Capture planes
-	for (int i = 0; i < capturePlanes.size(); i++) {
-		delete capturePlanes[i];
+	for (int i = 0; i < captureContentPlanes.size(); i++) {
+		delete captureContentPlanes[i];
 	}
-	capturePlanes.clear();
+	captureContentPlanes.clear();
 
 	//Content planes
-	for (int i = 0; i < contentPlanes.size(); i++) {
-		delete contentPlanes[i];
+	for (int i = 0; i < masterContentPlanes.size(); i++) {
+		delete masterContentPlanes[i];
 	}
-	contentPlanes.clear();
+	masterContentPlanes.clear();
 
     if (captureTexId)
     {

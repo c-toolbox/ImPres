@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <fstream>
 #include <map>
+#include <sstream>
+#include <iterator>
 #include <algorithm> //used for transform string to lowercase
 #include <sgct.h>
 #include "Capture.hpp"
@@ -67,6 +69,23 @@ std::string getFileName(const std::string& s) {
 	}
 
 	return("");
+}
+
+template<typename Out>
+void split(const std::string &s, char delim, Out result) {
+	std::stringstream ss;
+	ss.str(s);
+	std::string item;
+	while (std::getline(ss, item, delim)) {
+		*(result++) = item;
+	}
+}
+
+
+std::vector<std::string> split(const std::string &s, char delim) {
+	std::vector<std::string> elems;
+	split(s, delim, std::back_inserter(elems));
+	return elems;
 }
 
 sgct::Engine * gEngine;
@@ -218,12 +237,17 @@ sgct::SharedBool planeReCreate(false);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
 
+#ifdef ZXING_ENABLED
+std::vector<std::string> lastDecodedOperations;
+#endif
+
 //ImGUI variables
 std::vector<std::string> imPlanes;
 int imPlaneIdx = 0;
 int imPlanePreviousIdx = 0;
 int imPlaneScreenAspect = 1610;
 int imPlaneMaterialAspect = 169;
+bool imPlaneCapturePresMode = false;
 bool imPlaneUseCaptureSize = false;
 float imPlaneHeight = 3.5f;
 float imPlaneAzimuth = 0.0f;
@@ -586,24 +610,25 @@ void myDraw2DFun()
 				ImGui::Text("  -  Capture Material Aspect Ratio");
 			}
 			ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
-			if (ImGui::Button("Add New Plane")) {
-				imPlanes.push_back("Content " + std::to_string((imPlanes.size() - 1)));
-				planeAttributes.addVal(ContentPlane(1.6f, 0.f, 85.f, 0.f));
+			if (!imPlaneCapturePresMode) {
+				if (ImGui::Button("Add New Plane")) {
+					imPlanes.push_back("Content " + std::to_string((imPlanes.size() - 1)));
+					planeAttributes.addVal(ContentPlane(1.6f, 0.f, 85.f, 0.f));
+				}
+				ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
+				ImGui::Checkbox("Show Plane", &imPlaneShow);
+				ImGui::Combo("Plane Source", &imPlaneImageIdx, planeImageFileNames);
+				ImGui::SliderFloat("Plane Height", &imPlaneHeight, 0.1f, 10.0f);
+				ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
+				ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
+				ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
 			}
-			ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
-			ImGui::Checkbox("Show Plane", &imPlaneShow);
-			ImGui::Combo("Plane Source", &imPlaneImageIdx, planeImageFileNames);
-			ImGui::SliderFloat("Plane Height", &imPlaneHeight, 0.1f, 10.0f);
-			ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
-			ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
-			ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
+			ImGui::Checkbox("Capture Presentation Mode (DomePres)", &imPlaneCapturePresMode);
 			if (ImGui::Button("Export Fisheye To Application Folder")) {
 				takeScreenshot = true;
 			}
-			if (ImGui::CollapsingHeader("Advanced", 0, true, false)) {
-				ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
-				ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
-			}
+			ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
+			ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
 		}
 		ImGui::End();
 
@@ -1011,21 +1036,23 @@ void myEncodeFun()
 	planeUseCaptureSize.setVal(imPlaneUseCaptureSize);
 	sgct::SharedData::instance()->writeBool(&planeUseCaptureSize);
 
-	std::vector<ContentPlane> pA = planeAttributes.getVal();
-	if (imPlaneIdx != imPlanePreviousIdx) {
-		imPlaneHeight = pA[imPlaneIdx].height;
-		imPlaneAzimuth = pA[imPlaneIdx].azimuth;
-		imPlaneElevation = pA[imPlaneIdx].elevation;
-		imPlaneRoll = pA[imPlaneIdx].roll;
-		imPlaneShow = pA[imPlaneIdx].currentlyActive;
-		imPlanePreviousIdx = imPlaneIdx;
-		imPlaneImageIdx = pA[imPlaneIdx].planeStrId;
-	}
+	if (!imPlaneCapturePresMode) {
+		std::vector<ContentPlane> pA = planeAttributes.getVal();
+		if (imPlaneIdx != imPlanePreviousIdx) {
+			imPlaneHeight = pA[imPlaneIdx].height;
+			imPlaneAzimuth = pA[imPlaneIdx].azimuth;
+			imPlaneElevation = pA[imPlaneIdx].elevation;
+			imPlaneRoll = pA[imPlaneIdx].roll;
+			imPlaneShow = pA[imPlaneIdx].currentlyActive;
+			imPlanePreviousIdx = imPlaneIdx;
+			imPlaneImageIdx = pA[imPlaneIdx].planeStrId;
+		}
 
-	if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
-	if (planeAttributes.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
-	pA[imPlaneIdx] = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive, pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]]);
-	planeAttributes.setVal(pA);
+		if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
+		if (planeAttributes.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
+		pA[imPlaneIdx] = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive, pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]]);
+		planeAttributes.setVal(pA);
+	}
 	sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
 	sgct::SharedData::instance()->writeBool(&planeReCreate);
 
@@ -1581,11 +1608,59 @@ void uploadData(uint8_t ** data, int width, int height)
 
 #ifdef ZXING_ENABLED
 		// If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
-		std::vector<std::string> decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height));
+		std::vector<std::string> decodedResults;
+		if(imPlaneCapturePresMode)
+			decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height));
+		
 		if (!decodedResults.empty()) {
+			//if we still have operations that have not been processed, we don't add any more
+			if (!lastDecodedOperations.empty())
+				return;
+
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "=====New operations from QR code slide=====\n");
 			for each(std::string decodedResult in decodedResults) {
 				sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodedResult.size(), decodedResult.c_str());
+				lastDecodedOperations.push_back(decodedResult.c_str());
 			}
+		}
+		else if (!lastDecodedOperations.empty()) {
+			// Now we can process them when decodedResults is empty
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "=====Processing operations=====\n");
+			std::vector<ContentPlane> pA = planeAttributes.getVal();
+			for (size_t i = 0; i < lastDecodedOperations.size(); i++) {
+				sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Operation: %s\n", lastDecodedOperations[i].c_str());
+				std::vector<std::string> operation = split(lastDecodedOperations[i].c_str(), ';');
+				if (operation.size() > 1) {
+					int capturePlaneIdx = -1;
+					for (int i = 0; i < captureContentPlanes.size(); i++) {
+						if (imPlanes[i] == operation[0]) {
+							capturePlaneIdx = i;
+							break;
+						}
+					}
+					if (capturePlaneIdx >= 0) {
+						for (int i = 1; i < operation.size(); i++) {
+							if (operation[i] == "VisibleOn") {
+								pA[capturePlaneIdx].currentlyActive = true;
+							}
+							else if (operation[i] == "VisibleOff") {
+								pA[capturePlaneIdx].currentlyActive = false;
+							}
+							else if (operation[i] == "FreezeOn") {
+								pA[capturePlaneIdx].currentlyActive = true;
+							}
+							else if (operation[i] == "FreezeOff") {
+								pA[capturePlaneIdx].currentlyActive = false;
+							}
+						}
+					}
+					else {
+						sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Could not find plane named: %s\n", operation[0].c_str());
+					}
+				}
+			}
+			planeAttributes.setVal(pA);
+			lastDecodedOperations.clear();
 		}
 		else {
 #endif

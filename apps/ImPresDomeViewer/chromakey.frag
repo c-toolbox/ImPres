@@ -52,6 +52,8 @@ void main()
 	float incrustation = chromaKey(color.rgb);
 	
 	color = mix(color, vec4(0.0), incrustation);
+	
+	color.a *= opacity;
 
 	fragColor = color;
 }

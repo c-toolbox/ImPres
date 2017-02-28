@@ -24,6 +24,7 @@
 class QRCodeInterpreter {
 public:
   static std::string decodeImage(zxing::Ref<zxing::LuminanceSource> source, bool print_exceptions = false, bool hybrid = false, bool tryhard = false);
+  static std::vector<std::string> decodeImageMulti(zxing::Ref<zxing::LuminanceSource> source, bool print_exceptions = false, bool hybrid = false, bool tryhard = false);
 };
 
 #endif /* _QR_CODE_INTERPRETER_H_ */

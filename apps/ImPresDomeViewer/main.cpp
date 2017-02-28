@@ -87,8 +87,7 @@ void myMouseButtonCallback(int button, int action);
 void myMouseScrollCallback(double xoffset, double yoffset);
 void myContextCreationCallback(GLFWwindow * win);
 
-sgct_utils::SGCTPlane * mainPlane = NULL;
-sgct_utils::SGCTPlane * secondaryPlane = NULL;
+std::vector<sgct_utils::SGCTPlane *> capturePlanes;
 std::vector<sgct_utils::SGCTPlane *> contentPlanes;
 sgct_utils::SGCTDome * dome = NULL;
 
@@ -179,7 +178,7 @@ void captureLoop(void *arg);
 void calculateStats();
 void startCapture();
 void stopCapture();
-void createCapturePlanes();
+void createPlanes();
 
 GLint Matrix_Loc = -1;
 GLint ScaleUV_Loc = -1;
@@ -230,7 +229,7 @@ float imPlaneHeight = 3.5f;
 float imPlaneAzimuth = 0.0f;
 float imPlaneElevation = 35.0f;
 float imPlaneRoll = 0.0f;
-bool imPlaneShow = false;
+bool imPlaneShow = true;
 int imPlaneImageIdx = 0;
 float imFadingTime = 2.0f;
 bool imChromaKey = false;
@@ -450,86 +449,60 @@ void myDraw3DFun()
 
 		glm::vec2 texSize = glm::vec2(static_cast<float>(gCapture->getWidth()), static_cast<float>(gCapture->getHeight()));
 
-		float mainPlaneOpacity = getContentPlaneOpacity(0);
-		float secplaneOpacity = getContentPlaneOpacity(1);
-
-		bool renderMainPlane = (mainPlaneOpacity > 0.f);
-		bool renderSecPlane = (secplaneOpacity > 0.f);
-
-		//stop or start capture depending on capture plane visibility
+		//stop capture if necassary
 		bool captureStarted = captureRunning.getVal();
-		if (captureStarted && !renderMainPlane && !renderSecPlane) {
+		if (captureStarted && captureLockStatus.getVal() == 1) {
 			stopCapture();
 		}
-		else if (!captureStarted && captureLockStatus.getVal() == 0 && (renderMainPlane || renderSecPlane)) {
-			startCapture();
-		}
 
-		if (renderMainPlane) {
-			glUniform1f(Opacity_L, mainPlaneOpacity);
+		if (fulldomeMode)
+		{
+			glUniform1f(Opacity_L, 1.f);
 
-			if (fulldomeMode)
-			{
-				// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
-				if (domeCut.getVal() == 2) {
-					glUniform2f(ScaleUV_L, texSize.y / texSize.x, 1.f);
-					glUniform2f(OffsetUV_L, ((texSize.x - texSize.y)*0.5f) / texSize.x, 0.f);
-				}
-				else {
-					glUniform2f(ScaleUV_L, 1.f, 1.f);
-					glUniform2f(OffsetUV_L, 0.f, 0.f);
-				}
-
-				glCullFace(GL_FRONT); //camera on the inside of the dome
-
-				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &MVP[0][0]);
-				dome->draw();
+			// TextureCut 2 equals showing only the middle square of a capturing a widescreen input
+			if (domeCut.getVal() == 2) {
+				glUniform2f(ScaleUV_L, texSize.y / texSize.x, 1.f);
+				glUniform2f(OffsetUV_L, ((texSize.x - texSize.y)*0.5f) / texSize.x, 0.f);
 			}
-			else //plane mode
-			{
-				glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
-				glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
-
-				glCullFace(GL_BACK);
-
-				//transform and draw plane
-				glm::mat4 mainPlaneTransform = glm::mat4(1.0f);
-				mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-				mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-				mainPlaneTransform = glm::rotate(mainPlaneTransform, glm::radians(planeAttributes.getVal()[0].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-				mainPlaneTransform = glm::translate(mainPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
-
-				mainPlaneTransform = MVP * mainPlaneTransform;
-				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &mainPlaneTransform[0][0]);
-
-				mainPlane->draw();
+			else {
+				glUniform2f(ScaleUV_L, 1.f, 1.f);
+				glUniform2f(OffsetUV_L, 0.f, 0.f);
 			}
+
+			glCullFace(GL_FRONT); //camera on the inside of the dome
+
+			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &MVP[0][0]);
+			dome->draw();
 		}
-
-		if (renderSecPlane) {
-			glUniform1f(Opacity_L, secplaneOpacity);
-
+		else //plane mode
+		{
 			glUniform2f(ScaleUV_L, planeScaling.x, planeScaling.y);
 			glUniform2f(OffsetUV_L, planeOffset.x, planeOffset.y);
 
-			//transform and draw plane
-			glm::mat4 secondaryPlaneTransform = glm::mat4(1.0f);
-			secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-			secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-			secondaryPlaneTransform = glm::rotate(secondaryPlaneTransform, glm::radians(planeAttributes.getVal()[1].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-			secondaryPlaneTransform = glm::translate(secondaryPlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+			glCullFace(GL_BACK);
 
-			secondaryPlaneTransform = MVP * secondaryPlaneTransform;
-			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &secondaryPlaneTransform[0][0]);
+			for (int i = 0; i < capturePlanes.size(); i++) {
+				float planeOpacity = getContentPlaneOpacity(i);
+				glUniform1f(Opacity_L, planeOpacity);
 
-			secondaryPlane->draw();
+				glm::mat4 capturePlaneTransform = glm::mat4(1.0f);
+				capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+				capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+				capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+				capturePlaneTransform = glm::translate(capturePlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+
+				capturePlaneTransform = MVP * capturePlaneTransform;
+				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &capturePlaneTransform[0][0]);
+
+				capturePlanes[i]->draw();
+			}
 		}
 	}
 
 	float planeOpacity;
-	for (int i = 2; i < planeAttributes.getSize(); i++) {
+	for (int i = static_cast<int>(capturePlanes.size()); i < planeAttributes.getSize(); i++) {
 		planeOpacity = getContentPlaneOpacity(i);
-		if (planeOpacity > 0.f && contentPlanes.size() > i-2) {
+		if (planeOpacity > 0.f && contentPlanes.size() > i-capturePlanes.size()) {
 			glActiveTexture(GL_TEXTURE0);
 			if (planeAttributes.getVal()[i].planeStrId > 0) {
 				glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
@@ -553,7 +526,7 @@ void myDraw3DFun()
 			contentPlaneTransform = MVP * contentPlaneTransform;
 			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &contentPlaneTransform[0][0]);
 
-			contentPlanes[i-2]->draw();
+			contentPlanes[i- capturePlanes.size()]->draw();
 		}
 	}
 
@@ -695,7 +668,7 @@ void myPostSyncPreDrawFun()
     fulldomeMode = renderDome.getVal(); //set the flag frame synchronized for all viewports
 
 	if (planeReCreate.getVal())
-		createCapturePlanes();
+		createPlanes();
 }
 
 void startCapture()
@@ -719,46 +692,43 @@ void stopCapture()
 	}
 }
 
-void createCapturePlanes() {
-	if (mainPlane != NULL)
-		delete mainPlane;
-
-	if (secondaryPlane != NULL)
-		delete secondaryPlane;
+void createPlanes() {
+	//Capture planes
+	int capturePlaneSize = static_cast<int>(capturePlanes.size());
+	for (int i = 0; i < capturePlaneSize; i++) {
+		delete capturePlanes[i];
+	}
+	capturePlanes.clear();
 
 	float captureRatio = (static_cast<float>(gCapture->getWidth()) / static_cast<float>(gCapture->getHeight()));
-	float mainPlaneWidth = planeAttributes.getVal()[0].height * captureRatio;
-	float secondaryPlaneWidth = planeAttributes.getVal()[1].height * captureRatio;
 
-	if (planeUseCaptureSize.getVal())
-	{
-		mainPlane = new sgct_utils::SGCTPlane(mainPlaneWidth, planeAttributes.getVal()[0].height);
-		secondaryPlane = new sgct_utils::SGCTPlane(secondaryPlaneWidth, planeAttributes.getVal()[1].height);
-	}
-	else
-	{
-		switch (planeMaterialAspect.getVal())
+	for (int i = 0; i < capturePlaneSize; i++) {
+		float planeWidth = planeAttributes.getVal()[i].height * captureRatio;
+
+		if (planeUseCaptureSize.getVal())
 		{
-		case 1610:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 10.0f) * 16.0f, planeAttributes.getVal()[0].height);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 10.0f) * 16.0f, planeAttributes.getVal()[1].height);
-			break;
-		case 169:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 9.0f) * 16.0f, planeAttributes.getVal()[0].height);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 9.0f) * 16.0f, planeAttributes.getVal()[1].height);
-			break;
-		case 54:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 4.0f) * 5.0f, planeAttributes.getVal()[0].height);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 4.0f) * 5.0f, planeAttributes.getVal()[1].height);
-			break;
-		case 43:
-			mainPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[0].height / 3.0f) * 4.0f, planeAttributes.getVal()[0].height);
-			secondaryPlane = new sgct_utils::SGCTPlane((planeAttributes.getVal()[1].height / 3.0f) * 4.0f, planeAttributes.getVal()[1].height);
-			break;
-		default:
-			mainPlane = new sgct_utils::SGCTPlane(mainPlaneWidth, planeAttributes.getVal()[0].height);
-			secondaryPlane = new sgct_utils::SGCTPlane(secondaryPlaneWidth, planeAttributes.getVal()[1].height);
-			break;
+			capturePlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
+		}
+		else
+		{
+			switch (planeMaterialAspect.getVal())
+			{
+			case 1610:
+				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 10.0f) * 16.0f, planeAttributes.getVal()[i].height));
+				break;
+			case 169:
+				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 9.0f) * 16.0f, planeAttributes.getVal()[i].height));
+				break;
+			case 54:
+				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 4.0f) * 5.0f, planeAttributes.getVal()[i].height));
+				break;
+			case 43:
+				capturePlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 3.0f) * 4.0f, planeAttributes.getVal()[i].height));
+				break;
+			default:
+				capturePlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
+				break;
+			}
 		}
 	}
 
@@ -884,7 +854,7 @@ void createCapturePlanes() {
 	}
 	contentPlanes.clear();
 
-	for (int i = 2; i < planeAttributes.getSize(); i++) {
+	for (size_t i = capturePlanes.size(); i < planeAttributes.getSize(); i++) {
 		float width = planeAttributes.getVal()[i].height * texAspectRatio.getValAt(planeAttributes.getVal()[i].planeTexId);
 		contentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributes.getVal()[i].height));
 	}
@@ -910,11 +880,15 @@ void myInitOGLFun()
     std::function<void(uint8_t ** data, int width, int height)> callback = uploadData;
     gCapture->setVideoDecoderCallback(callback);
 
-	//define main and secondary planes
-	imPlanes.push_back("Main Capture Plane");
-	imPlanes.push_back("Seconday Capture Plane");
-	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, false));
+	//define capture planes
+	imPlanes.push_back("FrontCapture");
+	planeAttributes.addVal(ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, true));
+	capturePlanes.push_back(nullptr);
+
+	imPlanes.push_back("BackCapture");
 	planeAttributes.addVal(ContentPlane(1.8f, -155.f, 20.f, imPlaneRoll, false));
+	capturePlanes.push_back(nullptr);
+
 	planeImageFileNames.push_back("Capture Card");
 
 	//define default content plane
@@ -922,7 +896,7 @@ void myInitOGLFun()
 	//planeAttributes.addVal(ContentPlane(1.6f, 0.f, 95.0f, 0.f));
 
     //create plane
-	createCapturePlanes();
+	createPlanes();
 
     //create dome
     dome = new sgct_utils::SGCTDome(7.4f, 180.0f, 256, 128);
@@ -1084,11 +1058,17 @@ void myCleanUpFun()
     if (dome != NULL)
         delete dome;
 
-    if (mainPlane != NULL)
-        delete mainPlane;
+	//Capture planes
+	for (int i = 0; i < capturePlanes.size(); i++) {
+		delete capturePlanes[i];
+	}
+	capturePlanes.clear();
 
-	if (secondaryPlane != NULL)
-		delete secondaryPlane;
+	//Content planes
+	for (int i = 0; i < contentPlanes.size(); i++) {
+		delete contentPlanes[i];
+	}
+	contentPlanes.clear();
 
     if (captureTexId)
     {
@@ -1360,8 +1340,9 @@ void readImage(unsigned char * data, int len)
         //clear if failed
         delete img;
     }
-    else
-        transImages.push_back(img);
+	else {
+		transImages.push_back(img);
+	}
 
     mutex.unlock();
 }
@@ -1595,40 +1576,49 @@ void uploadData(uint8_t ** data, int width, int height)
 
     if (captureTexId)
     {
-        unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
-        if (GPU_ptr)
-        {
-            int dataOffset = 0;
-            int stride = width * 3;
-
-            if (flipFrame)
-            {
-                for (int row = 0; row < height; row++)
-                {
-                    memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
-                    dataOffset += stride;
-                }
-            }
-            else
-            {
-                for (int row = height - 1; row > -1; row--)
-                {
-                    memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
-                    dataOffset += stride;
-                }
-            }
-
-            glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, captureTexId);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
-        }
 
 #ifdef ZXING_ENABLED
-		std::string decodeResult = QRCodeInterpreter::decodeImage(BGR24LuminanceSource::create(data, width, height));
-		if(!decodeResult.empty())
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodeResult.size(), decodeResult.c_str());
+		// If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
+		std::vector<std::string> decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height));
+		if (!decodedResults.empty()) {
+			for each(std::string decodedResult in decodedResults) {
+				sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodedResult.size(), decodedResult.c_str());
+			}
+		}
+		else {
+#endif
+
+			unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
+			if (GPU_ptr)
+			{
+				int dataOffset = 0;
+				int stride = width * 3;
+
+				if (flipFrame)
+				{
+					for (int row = 0; row < height; row++)
+					{
+						memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+						dataOffset += stride;
+					}
+				}
+				else
+				{
+					for (int row = height - 1; row > -1; row--)
+					{
+						memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+						dataOffset += stride;
+					}
+				}
+
+				glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, captureTexId);
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+			}
+#ifdef ZXING_ENABLED
+		}
 #endif
 
         calculateStats();

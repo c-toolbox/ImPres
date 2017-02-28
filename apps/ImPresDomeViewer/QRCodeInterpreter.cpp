@@ -35,6 +35,7 @@
 
 using namespace zxing;
 using namespace zxing::qrcode;
+using namespace zxing::multi;
 
 std::string QRCodeInterpreter::decodeImage(Ref<LuminanceSource> source, bool print_exceptions, bool hybrid, bool tryhard) {
 	try {
@@ -52,7 +53,7 @@ std::string QRCodeInterpreter::decodeImage(Ref<LuminanceSource> source, bool pri
 		Ref<BinaryBitmap> binary(new BinaryBitmap(binarizer));
 
 		Ref<Reader> reader(new QRCodeReader);
-		
+
 		Ref<Result> result = reader->decode(binary, hints);
 
 		return result->getText()->getText();
@@ -75,4 +76,48 @@ std::string QRCodeInterpreter::decodeImage(Ref<LuminanceSource> source, bool pri
 	}
 
 	return "";
+}
+
+std::vector<std::string> QRCodeInterpreter::decodeImageMulti(Ref<LuminanceSource> source, bool print_exceptions, bool hybrid, bool tryhard) {
+	std::vector<std::string> textResults;
+	try {
+		Ref<Binarizer> binarizer;
+		if (hybrid) {
+			binarizer = new HybridBinarizer(source);
+		}
+		else {
+			binarizer = new GlobalHistogramBinarizer(source);
+		}
+
+		DecodeHints hints(DecodeHints::QR_CODE_HINT);
+		hints.setTryHarder(tryhard);
+
+		Ref<BinaryBitmap> binary(new BinaryBitmap(binarizer));
+
+		Ref<MultipleBarcodeReader> reader(new QRCodeMultiReader);
+
+		std::vector<Ref<Result> > results = reader->decodeMultiple(binary, hints);
+
+		for each(Ref<Result> result in results) {
+			textResults.push_back(result->getText()->getText());
+		}
+	}
+	catch (const ReaderException& e) {
+		if (print_exceptions)
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::ReaderException: %s\n", e.what());
+	}
+	catch (const zxing::IllegalArgumentException& e) {
+		if (print_exceptions)
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::IllegalArgumentException: %s\n", e.what());
+	}
+	catch (const zxing::Exception& e) {
+		if (print_exceptions)
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "zxing::Exception: %s\n", e.what());
+	}
+	catch (const std::exception& e) {
+		if (print_exceptions)
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "std::exception: %s\n", e.what());
+	}
+
+	return textResults;
 }

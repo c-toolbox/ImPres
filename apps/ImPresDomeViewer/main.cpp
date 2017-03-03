@@ -1725,7 +1725,7 @@ void uploadData(uint8_t ** data, int width, int height)
 		// If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
 		std::vector<std::string> decodedResults;
 		if(planeCapturePresMode.getVal())
-			decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height));
+			decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height, flipFrame));
 		
 		if (!decodedResults.empty()) {
 			//Save only unique operations

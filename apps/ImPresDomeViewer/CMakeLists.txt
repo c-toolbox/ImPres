@@ -33,7 +33,7 @@ set(APP_NAME ImPresDomeViewer)
 
 set(CMAKE_DEBUG_POSTFIX "d" CACHE STRING "add a postfix, usually d on windows")
 set(CMAKE_RELEASE_POSTFIX "" CACHE STRING "add a postfix, usually empty on windows")
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/user_cmake/Modules)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/user_cmake/Modules")
 
 project(${APP_NAME})
 
@@ -75,6 +75,38 @@ else()
 	set(IMPRES_ZXING_SRC "")
 endif()
 
+##OpenVR section start####################
+option(OPENVR_SUPPORT "Build ImPres application with OpenVR support" OFF)
+if(OPENVR_SUPPORT)
+	find_package(OpenVR REQUIRED)
+	
+	if(OPENVR_FOUND)
+		add_definitions(-DOPENVR_SUPPORT)
+	endif()
+
+	if(NOT SGCT_OPENVR_INCLUDE_DIRECTORY)
+		if( WIN32 )
+			find_path(SGCT_OPENVR_INCLUDE_DIRECTORY
+				NAMES SGCTOpenVR.h
+				PATHS ${SGCT_BASE_DIRECTORY}/additional_includes/openvr ${CMAKE_SOURCE_DIR}/additional_includes/openvr NO_DEFAULT_PATH
+				REQUIRED)
+		else()
+			find_path(SGCT_OPENVR_INCLUDE_DIRECTORY
+				NAMES SGCTOpenVR.h
+				PATH_SUFFIXES SGCTOpenVR
+				PATHS ${SGCT_BASE_DIRECTORY}/additional_includes/openvr ${CMAKE_SOURCE_DIR}/additional_includes/openvr
+				REQUIRED)
+		endif()
+	else()
+		set(SGCT_OPENVR_FILES ${SGCT_OPENVR_INCLUDE_DIRECTORY}/SGCTOpenVR.h ${SGCT_OPENVR_INCLUDE_DIRECTORY}/SGCTOpenVR.cpp)
+	endif()
+else()
+	set(OPENVR_INCLUDE_DIRS "")
+	set(SGCT_OPENVR_INCLUDE_DIRECTORY "")
+	set(OPENVR_LIBRARY "")
+endif()
+##OpenVR section end####################
+
 add_executable(${APP_NAME}
 	main.cpp
 	Capture.cpp
@@ -87,7 +119,8 @@ add_executable(${APP_NAME}
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_draw.cpp
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.cpp
-	${IMPRES_ZXING_SRC}	
+	${IMPRES_ZXING_SRC}
+	${SGCT_OPENVR_FILES}
 )
 
 #copy data
@@ -154,7 +187,7 @@ set(FFMPEG_INCLUDES
 	${FFMPEG_LIBSWSCALE_INCLUDE_DIRS}
 	${FFMPEG_LIBAVRESAMPLE_INCLUDE_DIRS})
 
-include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY})
+include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY} ${OPENVR_INCLUDE_DIRS} ${SGCT_OPENVR_INCLUDE_DIRECTORY})
 
 set(FFMPEG_LIBS
 	${FFMPEG_LIBAVCODEC_LIBRARIES}
@@ -171,6 +204,7 @@ if( MSVC )
 		ws2_32
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
+		${OPENVR_LIBRARY}
 	)
 elseif( WIN32 ) #MINGW or similar
 	set(LIBS
@@ -179,6 +213,7 @@ elseif( WIN32 ) #MINGW or similar
 		ws2_32
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
+		${OPENVR_LIBRARY}
 	)
 elseif( APPLE )
 	find_library(COCOA_LIBRARY Cocoa REQUIRED)
@@ -193,6 +228,7 @@ elseif( APPLE )
 		${COREVIDEO_LIBRARY}
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
+		${OPENVR_LIBRARY}
 	)
 else() #linux
 	find_package(X11 REQUIRED)
@@ -209,7 +245,8 @@ else() #linux
 		${X11_Xcursor_LIB}
 		${CMAKE_THREAD_LIBS_INIT}
 		${FFMPEG_LIBS}
-		${ZXING_LIBRARY}		
+		${ZXING_LIBRARY}
+		${OPENVR_LIBRARY}		
 	)
 endif()
 

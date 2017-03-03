@@ -1,0 +1,1 @@
+ImPresDomeViewer.exe -config openvr.xml -host localhost -video "DVI2USB 3.0 D2S301387" -defaultfisheye "D:\CTech\ImPres\build-vs2015\apps\ImPresDomeViewer\Release\quanta.png"

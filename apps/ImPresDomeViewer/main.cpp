@@ -28,6 +28,11 @@
 #include "QRCodeInterpreter.h"
 #endif
 
+#ifdef OPENVR_SUPPORT
+#include <SGCTOpenVR.h>
+sgct::SGCTWindow* FirstOpenVRWindow = NULL;
+#endif
+
 #include <imgui.h>
 #include <imgui_impl_glfw_gl3.h>
 namespace ImGui
@@ -92,10 +97,11 @@ sgct::Engine * gEngine;
 Capture * gCapture = NULL;
 
 //sgct callbacks
-void myDraw3DFun();
-void myDraw2DFun();
 void myPreSyncFun();
 void myPostSyncPreDrawFun();
+void myDraw3DFun();
+void myDraw2DFun();
+void myPostDrawFun();
 void myInitOGLFun();
 void myEncodeFun();
 void myDecodeFun();
@@ -239,7 +245,7 @@ sgct::SharedVector<ContentPlane> planeAttributes;
 sgct::SharedBool planeReCreate(false);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
-sgct::SharedFloat chromaKeyFactor(4.f);
+sgct::SharedFloat chromaKeyFactor(22.f);
 
 std::vector<GLuint> planeTexOwnedIds;
 
@@ -264,7 +270,7 @@ int imPlaneImageIdx = 0;
 float imFadingTime = 2.0f;
 bool imChromaKey = false;
 ImVec4 imChromaKeyColor = ImColor(0, 190, 0);
-float imChromaKeyFactor = 4.f;
+float imChromaKeyFactor = 22.f;
 
 int main( int argc, char* argv[] )
 {
@@ -293,10 +299,11 @@ int main( int argc, char* argv[] )
     parseArguments(argc, argv);
     
     gEngine->setInitOGLFunction( myInitOGLFun );
-    gEngine->setDrawFunction( myDraw3DFun );
-    gEngine->setDraw2DFunction( myDraw2DFun );
-    gEngine->setPreSyncFunction( myPreSyncFun );
-    gEngine->setPostSyncPreDrawFunction(myPostSyncPreDrawFun);
+	gEngine->setPreSyncFunction(myPreSyncFun);
+	gEngine->setPostSyncPreDrawFunction(myPostSyncPreDrawFun);
+    gEngine->setDrawFunction(myDraw3DFun);
+    gEngine->setDraw2DFunction(myDraw2DFun);
+	gEngine->setPostDrawFunction(myPostDrawFun);
     gEngine->setCleanUpFunction( myCleanUpFun );
     gEngine->setKeyboardCallbackFunction(myKeyCallback);
 	gEngine->setCharCallbackFunction(myCharCallback);
@@ -323,6 +330,11 @@ int main( int argc, char* argv[] )
     // Main loop
     gEngine->render();
 
+#ifdef OPENVR_SUPPORT
+	// Clean up OpenVR
+	sgct::SGCTOpenVR::shutdown();
+#endif
+
 	if(captureRunning.getVal())
 		stopCapture();
 
@@ -343,6 +355,75 @@ int main( int argc, char* argv[] )
 
     // Exit program
     exit( EXIT_SUCCESS );
+}
+
+void myPreSyncFun()
+{
+	if (gEngine->isMaster())
+	{
+		curr_time.setVal(sgct::Engine::getTime());
+
+		//load one default fisheye at certain intervals, if their are any
+		if (!defaultFisheyes.empty()) {
+			if (defaultFisheyeTime == 0) {
+				defaultFisheyeTime = curr_time.getVal() + defaultFisheyeDelay;
+			}
+			else if (curr_time.getVal() > defaultFisheyeTime) {
+				serverUploadCount.setVal(0);
+				transferSupportedFiles(defaultFisheyes.at(0));
+				defaultFisheyes.erase(defaultFisheyes.begin());
+				/*for each (std::string defaultFisheye in defaultFisheyes) {
+				transferSupportedFiles(defaultFisheye);
+				}
+				defaultFisheyes.clear();*/
+				defaultFisheyeTime = 0;
+
+			}
+		}
+
+		//if texture is uploaded then iterate the index
+		if (serverUploadDone.getVal() && clientsUploadDone.getVal())
+		{
+			numSyncedTex = static_cast<int32_t>(texIds.getSize());
+
+			//only iterate up if we have no image
+			if (domeTexIndex < 0) {
+				domeTexIndex = numSyncedTex - serverUploadCount.getVal();
+				currentDomeTexIdx = domeTexIndex.getVal();
+			}
+
+			serverUploadDone = false;
+			clientsUploadDone = false;
+		}
+	}
+
+	if (screenshotPassOn) {
+		screenshotPassOn = false;
+	}
+}
+
+void myPostSyncPreDrawFun()
+{
+	gEngine->setDisplayInfoVisibility(info.getVal());
+	gEngine->setStatsGraphVisibility(stats.getVal());
+
+	if (takeScreenshot) {
+		gEngine->takeScreenshot();
+		takeScreenshot = false;
+		screenshotPassOn = true;
+	}
+
+	fulldomeMode = renderDome.getVal(); //set the flag frame synchronized for all viewports
+
+	if (planeReCreate.getVal())
+		createPlanes();
+
+#ifdef OPENVR_SUPPORT
+	if (FirstOpenVRWindow) {
+		//Update pose matrices for all tracked OpenVR devices once per frame
+		sgct::SGCTOpenVR::updatePoses();
+	}
+#endif
 }
 
 float getContentPlaneOpacity(int planeIdx) {
@@ -395,7 +476,29 @@ void myDraw3DFun()
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
+#ifdef OPENVR_SUPPORT
+	glm::mat4 MVP;
+	if (sgct::SGCTOpenVR::isHMDActive() &&
+		(FirstOpenVRWindow == gEngine->getCurrentWindowPtr() || gEngine->getCurrentWindowPtr()->checkIfTagExists("OpenVR"))) {
+		MVP = sgct::SGCTOpenVR::getHMDCurrentViewProjectionMatrix(gEngine->getCurrentFrustumMode());
+
+		if (gEngine->getCurrentFrustumMode() == sgct_core::Frustum::MonoEye) {
+			//Reversing rotation around z axis (so desktop view is more pleasent to look at).
+			glm::quat inverserotation = sgct::SGCTOpenVR::getInverseRotation(sgct::SGCTOpenVR::getHMDPoseMatrix());
+			inverserotation.x = inverserotation.y = 0.f;
+			MVP *= glm::mat4_cast(inverserotation);
+		}
+
+		//Tilt dome
+		glm::mat4 tiltMat = glm::mat4(glm::rotate(glm::mat4(1.0f), glm::radians(-27.f), glm::vec3(1.0f, 0.0f, 0.0f)));
+		MVP *= tiltMat;
+	}
+	else {
+		MVP = gEngine->getCurrentModelViewProjectionMatrix();
+	}
+#else
     glm::mat4 MVP = gEngine->getCurrentModelViewProjectionMatrix();
+#endif
 
     //Set up backface culling
     glCullFace(GL_BACK);
@@ -592,7 +695,12 @@ void myDraw2DFun()
             captureRate.getVal());
     }
 
-	if (gEngine->isMaster() && !screenshotPassOn)
+	bool drawGUI = true;
+#ifdef OPENVR_SUPPORT
+	if (FirstOpenVRWindow == gEngine->getCurrentWindowPtr())
+		drawGUI = false;
+#endif
+	if (gEngine->isMaster() && !screenshotPassOn && drawGUI)
 	{
 		ImGui_ImplGlfwGL3_NewFrame(gEngine->getCurrentWindowPtr()->getXFramebufferResolution(), gEngine->getCurrentWindowPtr()->getYFramebufferResolution());
 
@@ -649,66 +757,14 @@ void myDraw2DFun()
 	}
 }
 
-void myPreSyncFun()
+void myPostDrawFun()
 {
-    if( gEngine->isMaster() )
-    {
-        curr_time.setVal( sgct::Engine::getTime() );
-
-		//load one default fisheye at certain intervals, if their are any
-		if (!defaultFisheyes.empty()) {
-			if (defaultFisheyeTime == 0) {
-				defaultFisheyeTime = curr_time.getVal() + defaultFisheyeDelay;
-			}
-			else if (curr_time.getVal() > defaultFisheyeTime) {
-				serverUploadCount.setVal(0);
-				transferSupportedFiles(defaultFisheyes.at(0));
-				defaultFisheyes.erase(defaultFisheyes.begin());
-				/*for each (std::string defaultFisheye in defaultFisheyes) {
-					transferSupportedFiles(defaultFisheye);
-				}
-				defaultFisheyes.clear();*/
-				defaultFisheyeTime = 0;
-
-			}
-		}
-
-        //if texture is uploaded then iterate the index
-        if (serverUploadDone.getVal() && clientsUploadDone.getVal())
-        {
-            numSyncedTex = static_cast<int32_t>(texIds.getSize());
-            
-            //only iterate up if we have no image
-			if (domeTexIndex < 0) {
-				domeTexIndex = numSyncedTex - serverUploadCount.getVal();
-				currentDomeTexIdx = domeTexIndex.getVal();
-			}
-
-            serverUploadDone = false;
-            clientsUploadDone = false;
-        }
-    }
-
-	if (screenshotPassOn) {
-		screenshotPassOn = false;
+#ifdef OPENVR_SUPPORT
+	if (FirstOpenVRWindow) {
+		//Copy the first OpenVR window to the HMD
+		sgct::SGCTOpenVR::copyWindowToHMD(FirstOpenVRWindow);
 	}
-}
-
-void myPostSyncPreDrawFun()
-{
-    gEngine->setDisplayInfoVisibility(info.getVal());
-    gEngine->setStatsGraphVisibility(stats.getVal());
-
-    if (takeScreenshot) {
-        gEngine->takeScreenshot();
-		takeScreenshot = false;
-		screenshotPassOn = true;
-    }
-
-    fulldomeMode = renderDome.getVal(); //set the flag frame synchronized for all viewports
-
-	if (planeReCreate.getVal())
-		createPlanes();
+#endif
 }
 
 void startCapture()
@@ -905,6 +961,22 @@ void createPlanes() {
 
 void myInitOGLFun()
 {
+#ifdef OPENVR_SUPPORT
+	//Find if we have at least one OpenVR window
+	//Save reference to first OpenVR window, which is the one we will copy to the HMD.
+	for (size_t i = 0; i < gEngine->getNumberOfWindows(); i++) {
+		if (gEngine->getWindowPtr(i)->checkIfTagExists("OpenVR")) {
+			FirstOpenVRWindow = gEngine->getWindowPtr(i);
+			break;
+		}
+	}
+	//If we have an OpenVRWindow, initialize OpenVR.
+	if (FirstOpenVRWindow) {
+		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "OpenVR Initalized!\n");
+		sgct::SGCTOpenVR::initialize(gEngine->getNearClippingPlane(), gEngine->getFarClippingPlane());
+	}
+#endif
+
     gCapture->init();
 
     //allocate texture

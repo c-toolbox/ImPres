@@ -121,6 +121,7 @@ sgct::SharedFloat fadingTime(2.0f);
 
 //structs
 struct ContentPlane {
+	std::string name;
 	float height;
 	float azimuth;
 	float elevation;
@@ -130,10 +131,10 @@ struct ContentPlane {
 	double fadeStartTime;
 	int planeStrId;
 	int planeTexId;
-	GLuint planeTexOwnedId;
 	bool freeze;
 
-	ContentPlane(float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0, int pls = 0, int pli = 0, GLuint ploi = 0, bool fr = false) :
+	ContentPlane(std::string n, float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0, int pls = 0, int pli = 0, bool fr = false) :
+		name(n),
 		height(h), 
 		azimuth(a) ,
 		elevation(e) ,
@@ -142,8 +143,7 @@ struct ContentPlane {
 		previouslyActive(pa) ,
 		fadeStartTime(f) ,
 		planeStrId(pls) ,
-		planeTexId(pli) , 
-		planeTexOwnedId(ploi),
+		planeTexId(pli) ,
 		freeze(fr)
 	{};
 };
@@ -235,11 +235,14 @@ sgct::SharedDouble captureRate(0.0);
 sgct::SharedInt32 domeCut(2);
 sgct::SharedInt planeScreenAspect(1610);
 sgct::SharedInt planeMaterialAspect(169);
+sgct::SharedBool planeCapturePresMode(false);
 sgct::SharedBool planeUseCaptureSize(false);
 sgct::SharedVector<ContentPlane> planeAttributes;
 sgct::SharedBool planeReCreate(false);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
+
+std::vector<GLuint> planeTexOwnedIds;
 
 #ifdef ZXING_ENABLED
 std::vector<std::string> operationsQueue;
@@ -506,7 +509,7 @@ void myDraw3DFun()
 			for (int i = 0; i < captureContentPlanes.size(); i++) {
 				glActiveTexture(GL_TEXTURE0);
 				if (planeAttributes.getVal()[i].freeze) {
-					glBindTexture(GL_TEXTURE_2D, planeAttributes.getVal()[i].planeTexOwnedId);
+					glBindTexture(GL_TEXTURE_2D, planeTexOwnedIds[i]);
 				}
 				else if (planeAttributes.getVal()[i].planeStrId > 0) {
 					glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
@@ -619,8 +622,9 @@ void myDraw2DFun()
 			ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
 			if (!imPlaneCapturePresMode) {
 				if (ImGui::Button("Add New Plane")) {
-					imPlanes.push_back("Content " + std::to_string((imPlanes.size() - 1)));
-					planeAttributes.addVal(ContentPlane(1.6f, 0.f, 85.f, 0.f));
+					std::string name = "Content " + std::to_string((imPlanes.size() - 1));
+					imPlanes.push_back(name);
+					planeAttributes.addVal(ContentPlane(name, 1.6f, 0.f, 85.f, 0.f));
 				}
 				ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
 				ImGui::Checkbox("Show Plane", &imPlaneShow);
@@ -917,32 +921,32 @@ void myInitOGLFun()
 
 	//define capture planes
 	imPlanes.push_back("FrontCapture");
-	ContentPlane frontCapture = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, true);
-	frontCapture.planeTexOwnedId = allocateCaptureTexture();
+	ContentPlane frontCapture = ContentPlane("FrontCapture", imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, true);
+	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(frontCapture);
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("BackCapture");
-	ContentPlane backCapture = ContentPlane(1.8f, -155.f, 20.f, imPlaneRoll, false);
-	backCapture.planeTexOwnedId = allocateCaptureTexture();
+	ContentPlane backCapture = ContentPlane("BackCapture", 1.8f, -155.f, 20.f, imPlaneRoll, false);
+	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(backCapture);
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("LeftCapture");
-	ContentPlane leftCapture = ContentPlane(imPlaneHeight, -70.f, imPlaneElevation, imPlaneRoll, false);
-	leftCapture.planeTexOwnedId = allocateCaptureTexture();
+	ContentPlane leftCapture = ContentPlane("LeftCapture", imPlaneHeight, -70.f, imPlaneElevation, imPlaneRoll, false);
+	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(leftCapture);
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("RightCapture");
-	ContentPlane rightCapture = ContentPlane(imPlaneHeight, 70.f, imPlaneElevation, imPlaneRoll, false);
-	rightCapture.planeTexOwnedId = allocateCaptureTexture();
+	ContentPlane rightCapture = ContentPlane("RightCapture", imPlaneHeight, 70.f, imPlaneElevation, imPlaneRoll, false);
+	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(rightCapture);
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("TopCapture");
-	ContentPlane topCapture = ContentPlane(imPlaneHeight, 0.f, 90.f, imPlaneRoll, false);
-	topCapture.planeTexOwnedId = allocateCaptureTexture();
+	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 90.f, imPlaneRoll, false);
+	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(topCapture);
 	captureContentPlanes.push_back(nullptr);
 
@@ -1060,11 +1064,13 @@ void myEncodeFun()
 	if (planeMaterialAspect.getVal() != imPlaneMaterialAspect) planeReCreate.setVal(true);
 	planeMaterialAspect.setVal(imPlaneMaterialAspect);
 	sgct::SharedData::instance()->writeInt32(&planeMaterialAspect);
+	planeCapturePresMode.setVal(imPlaneCapturePresMode);
+	sgct::SharedData::instance()->writeBool(&planeCapturePresMode);
 	if (planeUseCaptureSize.getVal() != imPlaneUseCaptureSize) planeReCreate.setVal(true);
 	planeUseCaptureSize.setVal(imPlaneUseCaptureSize);
 	sgct::SharedData::instance()->writeBool(&planeUseCaptureSize);
 
-	if (!imPlaneCapturePresMode) {
+	if (!planeCapturePresMode.getVal()) {
 		std::vector<ContentPlane> pA = planeAttributes.getVal();
 		if (imPlaneIdx != imPlanePreviousIdx) {
 			imPlaneHeight = pA[imPlaneIdx].height;
@@ -1078,11 +1084,11 @@ void myEncodeFun()
 
 		if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
 		if (planeAttributes.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
-		pA[imPlaneIdx] = ContentPlane(imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive, 
-			pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]], pA[imPlaneIdx].planeTexOwnedId, pA[imPlaneIdx].freeze);
+		pA[imPlaneIdx] = ContentPlane(pA[imPlaneIdx].name, imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive,
+			pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]], pA[imPlaneIdx].freeze);
 		planeAttributes.setVal(pA);
+		sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
 	}
-	sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
 	sgct::SharedData::instance()->writeBool(&planeReCreate);
 
 	chromaKey.setVal(imChromaKey);
@@ -1103,8 +1109,11 @@ void myDecodeFun()
 
 	sgct::SharedData::instance()->readInt32(&planeScreenAspect);
 	sgct::SharedData::instance()->readInt32(&planeMaterialAspect);
+	sgct::SharedData::instance()->readBool(&planeCapturePresMode);
 	sgct::SharedData::instance()->readBool(&planeUseCaptureSize);
-	sgct::SharedData::instance()->readVector<ContentPlane>(&planeAttributes);
+	if (!planeCapturePresMode.getVal()) {
+		sgct::SharedData::instance()->readVector<ContentPlane>(&planeAttributes);
+	}
 	sgct::SharedData::instance()->readBool(&planeReCreate);
 
 	sgct::SharedData::instance()->readBool(&chromaKey);
@@ -1640,7 +1649,7 @@ void uploadData(uint8_t ** data, int width, int height)
 #ifdef ZXING_ENABLED
 		// If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
 		std::vector<std::string> decodedResults;
-		if(imPlaneCapturePresMode)
+		if(planeCapturePresMode.getVal())
 			decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height));
 		
 		if (!decodedResults.empty()) {
@@ -1663,7 +1672,7 @@ void uploadData(uint8_t ** data, int width, int height)
 					if (operation.size() > 1) {
 						int capturePlaneIdx = -1;
 						for (int i = 0; i < captureContentPlanes.size(); i++) {
-							if (imPlanes[i] == operation[0]) {
+							if (pA[i].name == operation[0]) {
 								capturePlaneIdx = i;
 								break;
 							}
@@ -1678,7 +1687,7 @@ void uploadData(uint8_t ** data, int width, int height)
 								}
 								else if (operation[i] == "FreezeOn") {
 									pA[capturePlaneIdx].freeze = true;
-									glCopyImageSubData(captureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, pA[capturePlaneIdx].planeTexOwnedId, GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+									glCopyImageSubData(captureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[capturePlaneIdx], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
 									glFlush();
 								}
 								else if (operation[i] == "FreezeOff") {

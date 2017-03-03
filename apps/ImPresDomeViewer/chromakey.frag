@@ -4,6 +4,7 @@ uniform sampler2D Tex;
 uniform vec2 scaleUV;
 uniform vec2 offsetUV;
 
+uniform float chromaKeyFactor;
 uniform vec3 chromaKeyColor;
 uniform float opacity;
 
@@ -38,7 +39,7 @@ vec3 rgb2hsv(vec3 rgb)
 
 float chromaKey(vec3 color)
 {
-	vec3 weights = vec3(4., 1., 2.);
+	vec3 weights = vec3(chromaKeyFactor, 1., 2.);
 	vec3 hsv = rgb2hsv(color);
 	vec3 target = rgb2hsv(chromaKeyColor);
 	float dist = length(weights * (target - hsv));

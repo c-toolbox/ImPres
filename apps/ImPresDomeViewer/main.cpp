@@ -216,9 +216,7 @@ GLint ScaleUV_Loc_CK = -1;
 GLint OffsetUV_Loc_CK = -1;
 GLint Opacity_Loc_CK = -1;
 GLint ChromaKeyColor_Loc_CK = -1;
-GLint ChromaKeyCutOff_Loc_CK = -1;
-GLint ChromaKeySensitivity_Loc_CK = -1;
-GLint ChromaKeySmoothing_Loc_CK = -1;
+GLint ChromaKeyFactor_Loc_CK = -1;
 GLuint captureTexId = GL_FALSE;
 
 tthread::thread * captureThread;
@@ -241,6 +239,7 @@ sgct::SharedVector<ContentPlane> planeAttributes;
 sgct::SharedBool planeReCreate(false);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
+sgct::SharedFloat chromaKeyFactor(4.f);
 
 std::vector<GLuint> planeTexOwnedIds;
 
@@ -265,6 +264,7 @@ int imPlaneImageIdx = 0;
 float imFadingTime = 2.0f;
 bool imChromaKey = false;
 ImVec4 imChromaKeyColor = ImColor(0, 190, 0);
+float imChromaKeyFactor = 4.f;
 
 int main( int argc, char* argv[] )
 {
@@ -453,6 +453,7 @@ void myDraw3DFun()
             , chromaKeyColor.getVal().r
             , chromaKeyColor.getVal().g
             , chromaKeyColor.getVal().b);
+		glUniform1f(ChromaKeyFactor_Loc_CK, chromaKeyFactor.getVal());
         ScaleUV_L = ScaleUV_Loc_CK;
         OffsetUV_L = OffsetUV_Loc_CK;
         Matrix_L = Matrix_Loc_CK;
@@ -640,6 +641,7 @@ void myDraw2DFun()
 			}
 			ImGui::Checkbox("Chroma Key On/Off", &imChromaKey);
 			ImGui::ColorEdit3("Chroma Key Color", (float*)&imChromaKeyColor);
+			ImGui::SliderFloat("Chroma Key Factor", &imChromaKeyFactor, 1.f, 100.0f);
 		}
 		ImGui::End();
 
@@ -1003,9 +1005,7 @@ void myInitOGLFun()
     OffsetUV_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("offsetUV");
 	Opacity_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("opacity");
     ChromaKeyColor_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyColor");
-	ChromaKeyCutOff_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyCutOff");
-	ChromaKeySensitivity_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyThresholdSensitivity");
-	ChromaKeySmoothing_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeySmoothing");
+	ChromaKeyFactor_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("chromaKeyFactor");
     GLint Tex_Loc_CK = sgct::ShaderManager::instance()->getShaderProgram("chromakey").getUniformLocation("Tex");
     glUniform1i(Tex_Loc_CK, 0);
 
@@ -1095,6 +1095,8 @@ void myEncodeFun()
 	sgct::SharedData::instance()->writeBool(&chromaKey);
 	chromaKeyColor.setVal(glm::vec3(imChromaKeyColor.x, imChromaKeyColor.y, imChromaKeyColor.z));
 	sgct::SharedData::instance()->writeObj(&chromaKeyColor);
+	chromaKeyFactor.setVal(imChromaKeyFactor);
+	sgct::SharedData::instance()->writeFloat(&chromaKeyFactor);
 }
 
 void myDecodeFun()
@@ -1118,6 +1120,7 @@ void myDecodeFun()
 
 	sgct::SharedData::instance()->readBool(&chromaKey);
 	sgct::SharedData::instance()->readObj(&chromaKeyColor);
+	sgct::SharedData::instance()->readFloat(&chromaKeyFactor);
 }
 
 void myCleanUpFun()

@@ -6,3 +6,6 @@ Goal is to create an inituative way of utilizing an immersive environment as pre
 
 Current version (below) utilizes a capturing of a DirectShow source (framegrabber), for instance a laptop running a Powerpoint or Keynote, with the possibility of interactivly placing various images (immersive and flat) around the capture display areas. Focus is on fast setup without a substantial learning curve. 
 ![Screenshot](screenshot.PNG "Screenshot")
+
+Use markers inside your presentation to control the image planes.
+![Screenshot](impres-icons-concept.png "Markers")

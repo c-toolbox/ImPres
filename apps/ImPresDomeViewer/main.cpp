@@ -132,8 +132,8 @@ struct ContentPlane {
 	float azimuth;
 	float elevation;
 	float roll;
-	bool currentlyActive;
-	bool previouslyActive;
+	bool currentlyVisible;
+	bool previouslyVisible;
 	double fadeStartTime;
 	int planeStrId;
 	int planeTexId;
@@ -145,8 +145,8 @@ struct ContentPlane {
 		azimuth(a) ,
 		elevation(e) ,
 		roll(r) , 
-		currentlyActive(ca) , 
-		previouslyActive(pa) ,
+		currentlyVisible(ca) , 
+		previouslyVisible(pa) ,
 		fadeStartTime(f) ,
 		planeStrId(pls) ,
 		planeTexId(pli) ,
@@ -432,16 +432,16 @@ float getContentPlaneOpacity(int planeIdx) {
 
 	float planeOpacity = 1.f;
 
-	if (pl.currentlyActive != pl.previouslyActive && pl.fadeStartTime == -1.0) {
+	if (pl.currentlyVisible != pl.previouslyVisible && pl.fadeStartTime == -1.0) {
 		pl.fadeStartTime = curr_time.getVal();
-		pl.previouslyActive = pl.currentlyActive;
+		pl.previouslyVisible = pl.currentlyVisible;
 		
 		pA[planeIdx] = pl;
 		planeAttributes.setVal(pA);
 	}
 
 	if (pl.fadeStartTime != -1.0) {
-		if (pl.currentlyActive) {
+		if (pl.currentlyVisible) {
 			planeOpacity = static_cast<float>((curr_time.getVal() - pl.fadeStartTime)) / fadingTime.getVal();
 		}
 		else {
@@ -464,7 +464,7 @@ float getContentPlaneOpacity(int planeIdx) {
 			planeAttributes.setVal(pA);
 		}
 	}
-	else if (!pl.currentlyActive) {
+	else if (!pl.currentlyVisible) {
 		planeOpacity = 0.f;
 	}
 
@@ -1149,14 +1149,14 @@ void myEncodeFun()
 			imPlaneAzimuth = pA[imPlaneIdx].azimuth;
 			imPlaneElevation = pA[imPlaneIdx].elevation;
 			imPlaneRoll = pA[imPlaneIdx].roll;
-			imPlaneShow = pA[imPlaneIdx].currentlyActive;
+			imPlaneShow = pA[imPlaneIdx].currentlyVisible;
 			imPlanePreviousIdx = imPlaneIdx;
 			imPlaneImageIdx = pA[imPlaneIdx].planeStrId;
 		}
 
 		if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
 		if (planeAttributes.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
-		pA[imPlaneIdx] = ContentPlane(pA[imPlaneIdx].name, imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyActive,
+		pA[imPlaneIdx] = ContentPlane(pA[imPlaneIdx].name, imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyVisible,
 			pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]], pA[imPlaneIdx].freeze);
 		planeAttributes.setVal(pA);
 		sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
@@ -1746,29 +1746,45 @@ void uploadData(uint8_t ** data, int width, int height)
 					std::vector<std::string> operation = split(operationsQueue[i].c_str(), ';');
 					if (operation.size() > 1) {
 						int capturePlaneIdx = -1;
-						for (int i = 0; i < captureContentPlanes.size(); i++) {
-							if (pA[i].name == operation[0]) {
-								capturePlaneIdx = i;
+						for (int p = 0; p < captureContentPlanes.size(); p++) {
+							if (pA[p].name == operation[0]) {
+								capturePlaneIdx = p;
 								break;
 							}
 						}
 						if (capturePlaneIdx >= 0) {
-							for (int i = 1; i < operation.size(); i++) {
-								if (operation[i] == "VisibleOn") {
-									pA[capturePlaneIdx].currentlyActive = true;
-								}
-								else if (operation[i] == "VisibleOff") {
-									pA[capturePlaneIdx].currentlyActive = false;
-								}
-								else if (operation[i] == "FreezeOn") {
-									pA[capturePlaneIdx].freeze = true;
-									glCopyImageSubData(captureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[capturePlaneIdx], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
-									glFlush();
-								}
-								else if (operation[i] == "FreezeOff") {
-									pA[capturePlaneIdx].previouslyActive = false;
+							for (int o = 1; o < operation.size(); o++) {
+								if (operation[o] == "SetActive") {
+									// Setting capturePlaneIdx as active capture plane
+									pA[capturePlaneIdx].previouslyVisible = false;
 									pA[capturePlaneIdx].freeze = false;
 									pA[capturePlaneIdx].planeTexId = 0;
+
+									//Freezing other planes which are not already frozen
+									for (int p = 0; p < captureContentPlanes.size(); p++) {
+										if (p != capturePlaneIdx && !pA[p].freeze) {
+											pA[p].freeze = true;
+											glCopyImageSubData(captureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[p], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+											glFlush();
+										}
+									}
+									
+									// Setting capturePlaneIdx as active capture plane
+									pA[capturePlaneIdx].currentlyVisible = true;
+								}
+							}
+						}
+						else if (operation[0] == "AllCaptures") {
+							if (operation[1] == "Clear") {
+								//Making all planes fade out
+								for (int p = 0; p < captureContentPlanes.size(); p++) {
+									//Need to freeze all planes
+									if (!pA[p].freeze) {
+										pA[p].freeze = true;
+										glCopyImageSubData(captureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[p], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+										glFlush();
+									}
+									pA[p].currentlyVisible = false;
 								}
 							}
 						}

@@ -22,6 +22,7 @@
 #include <algorithm> //used for transform string to lowercase
 #include <sgct.h>
 #include "Capture.hpp"
+#include "TwinCapture.hpp"
 
 #ifdef ZXING_ENABLED
 #include "BGR24LuminanceSource.h"
@@ -95,6 +96,7 @@ std::vector<std::string> split(const std::string &s, char delim) {
 
 sgct::Engine * gEngine;
 Capture * gCapture = NULL;
+TwinCapture * gTwinCapture = NULL;
 
 //sgct callbacks
 void myPreSyncFun();
@@ -116,7 +118,9 @@ std::vector<sgct_utils::SGCTPlane *> captureContentPlanes;
 std::vector<sgct_utils::SGCTPlane *> masterContentPlanes;
 sgct_utils::SGCTDome * dome = NULL;
 
-GLFWwindow * hiddenWindow;
+GLFWwindow * hiddenCaptureWindow;
+GLFWwindow * hiddenTwinCaptureWindow;
+GLFWwindow * hiddenTransferWindow;
 GLFWwindow * sharedWindow;
 
 //variables to share across cluster
@@ -200,13 +204,18 @@ enum imageType { IM_JPEG, IM_PNG };
 const int headerSize = 1;
 
 //FFmpegCapture
-void uploadData(uint8_t ** data, int width, int height);
+void uploadCaptureData(uint8_t ** data, int width, int height);
+void uploadTwinCaptureData(uint8_t ** data, int width, int height, int idx);
 void parseArguments(int& argc, char**& argv);
 GLuint allocateCaptureTexture();
+GLuint allocateTwinCaptureTexture();
 void captureLoop(void *arg);
+void twinCaptureLoop(void *arg);
 void calculateStats();
 void startCapture();
 void stopCapture();
+void startTwinCapture();
+void stopTwinCapture();
 void createPlanes();
 
 GLint Matrix_Loc = -1;
@@ -224,8 +233,10 @@ GLint Opacity_Loc_CK = -1;
 GLint ChromaKeyColor_Loc_CK = -1;
 GLint ChromaKeyFactor_Loc_CK = -1;
 GLuint captureTexId = GL_FALSE;
+GLuint twinCaptureTexId = GL_FALSE;
 
 tthread::thread * captureThread;
+tthread::thread * twinCaptureThread;
 bool flipFrame = false;
 bool fulldomeMode = false;
 
@@ -233,6 +244,7 @@ glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
 
 sgct::SharedBool captureRunning(true);
+sgct::SharedBool twinCaptureRunning(true);
 sgct::SharedInt captureLockStatus(0);
 sgct::SharedBool renderDome(fulldomeMode);
 sgct::SharedDouble captureRate(0.0);
@@ -278,6 +290,7 @@ int main( int argc, char* argv[] )
     
     gEngine = new sgct::Engine( argc, argv );
     gCapture = new Capture();
+	gTwinCapture = new TwinCapture();
 
     // arguments:
     // -host <host which should capture>
@@ -338,6 +351,9 @@ int main( int argc, char* argv[] )
 	if(captureRunning.getVal())
 		stopCapture();
 
+	if (twinCaptureRunning.getVal())
+		stopTwinCapture();
+
     running.setVal(false);
     if (loadThread)
     {
@@ -351,6 +367,7 @@ int main( int argc, char* argv[] )
 
     // Clean up
     delete gCapture;
+	delete gTwinCapture;
     delete gEngine;
 
     // Exit program
@@ -503,7 +520,7 @@ void myDraw3DFun()
     //Set up backface culling
     glCullFace(GL_BACK);
 
-    if (domeTexIndex.getVal() != -1 && texIds.getSize() > domeTexIndex.getVal())
+    if (domeTexIndex.getVal() != -1)// && texIds.getSize() > domeTexIndex.getVal())
     {
 		float mix = -1;
 		if (previousDomeTexIndex != domeTexIndex.getVal() && domeBlendStartTime == -1.0) {
@@ -576,6 +593,7 @@ void myDraw3DFun()
 	bool captureStarted = captureRunning.getVal();
 	if (captureStarted && captureLockStatus.getVal() == 1) {
 		stopCapture();
+		stopTwinCapture();
 	}
 
 	//No capture planes when taking screenshot
@@ -788,6 +806,27 @@ void stopCapture()
 	}
 }
 
+void startTwinCapture()
+{
+	//start capture thread if host or load thread if master and not host
+	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
+	if (thisNode->getAddress() == gTwinCapture->getVideoHost()) {
+		twinCaptureRunning.setVal(true);
+		twinCaptureThread = new (std::nothrow) tthread::thread(twinCaptureLoop, NULL);
+	}
+}
+
+void stopTwinCapture()
+{
+	//kill capture thread
+	twinCaptureRunning.setVal(false);
+	if (twinCaptureThread)
+	{
+		twinCaptureThread->join();
+		delete twinCaptureThread;
+	}
+}
+
 void createPlanes() {
 	//Capture planes
 	int capturePlaneSize = static_cast<int>(captureContentPlanes.size());
@@ -977,21 +1016,46 @@ void myInitOGLFun()
 	}
 #endif
 
-    gCapture->init();
-
+    bool captureReady = gCapture->init();
     //allocate texture
-	captureTexId = allocateCaptureTexture();
-	planeImageFileNames.push_back("Capture Card");
+	if (captureReady) {
+		captureTexId = allocateCaptureTexture();
+	}
+	planeImageFileNames.push_back("Single Capture");
 
-    //start capture
-	startCapture();
+	if (captureReady) {
+		//start capture
+		startCapture();
+	}
+
+	bool twinCaptureReady = gTwinCapture->init();
+	//allocate twin texture
+	if (twinCaptureReady) {
+		twinCaptureTexId = allocateTwinCaptureTexture();
+	}
+	domeImageFileNames.push_back("Fisheye Capture");
+	texIds.addVal(twinCaptureTexId);
+	imagePathsVec.push_back(std::pair<std::string, int>("", 0));
+	imagePathsMap.insert(std::pair<std::string, int>(domeImageFileNames[0], 0));
+	lastPackage.setVal(0);
+	domeTexIndex.setVal(0);
+	currentDomeTexIdx = domeTexIndex.getVal();
+	numSyncedTex = 1;
+
+	if (twinCaptureReady) {
+		//start capture
+		startTwinCapture();
+	}
 
 	//start load thread
     if (gEngine->isMaster())
         loadThread = new (std::nothrow) tthread::thread(threadWorker, NULL);
 
-    std::function<void(uint8_t ** data, int width, int height)> callback = uploadData;
+    std::function<void(uint8_t ** data, int width, int height)> callback = uploadCaptureData;
     gCapture->setVideoDecoderCallback(callback);
+
+	std::function<void(uint8_t ** data, int width, int height, int idx)> twincallback = uploadTwinCaptureData;
+	gTwinCapture->setVideoDecoderCallback(twincallback);
 
 	//define capture planes
 	imPlanes.push_back("FrontCapture");
@@ -1230,8 +1294,14 @@ void myCleanUpFun()
     texIds.clear();
     
     
-    if(hiddenWindow)
-        glfwDestroyWindow(hiddenWindow);
+    if(hiddenCaptureWindow)
+        glfwDestroyWindow(hiddenCaptureWindow);
+
+	if (hiddenTwinCaptureWindow)
+		glfwDestroyWindow(hiddenTwinCaptureWindow);
+
+	if (hiddenTransferWindow)
+		glfwDestroyWindow(hiddenTransferWindow);
 }
 
 void myKeyCallback(int key, int action)
@@ -1320,12 +1390,24 @@ void myContextCreationCallback(GLFWwindow * win)
     glfwWindowHint( GLFW_VISIBLE, GL_FALSE );
     
     sharedWindow = win;
-    hiddenWindow = glfwCreateWindow( 1, 1, "Thread Window", NULL, sharedWindow );
-     
-    if( !hiddenWindow )
+
+    hiddenCaptureWindow = glfwCreateWindow( 1, 1, "Thread Capture Window", NULL, sharedWindow ); 
+    if( !hiddenCaptureWindow)
     {
-        sgct::MessageHandler::instance()->print("Failed to create loader context!\n");
+        sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
     }
+
+	hiddenTwinCaptureWindow = glfwCreateWindow(1, 1, "Thread TwinCapture Window", NULL, sharedWindow);
+	if (!hiddenTwinCaptureWindow)
+	{
+		sgct::MessageHandler::instance()->print("Failed to create twin capture context!\n");
+	}
+
+	hiddenTransferWindow = glfwCreateWindow(1, 1, "Thread Transfer Window", NULL, sharedWindow);
+	if (!hiddenTransferWindow)
+	{
+		sgct::MessageHandler::instance()->print("Failed to create transfer context!\n");
+	}
     
     //restore to normal
     glfwMakeContextCurrent( sharedWindow );
@@ -1341,6 +1423,7 @@ void myDataTransferDecoder(void * receivedData, int receivedlength, int packageI
 	bool captureStarted = captureRunning.getVal();
 	if (captureStarted) {
 		stopCapture();
+		stopTwinCapture();
 		captureLockStatus.setVal(captureLockStatus.getVal() + 1);
 	}
     
@@ -1351,6 +1434,7 @@ void myDataTransferDecoder(void * receivedData, int receivedlength, int packageI
 	//start capture
 	if (captureStarted) {
 		startCapture();
+		startTwinCapture();
 		captureLockStatus.setVal(captureLockStatus.getVal() - 1);
 	}
 }
@@ -1389,6 +1473,7 @@ void threadWorker(void *arg)
 			bool captureStarted = captureRunning.getVal();
 			if (captureStarted) {
 				stopCapture();
+				stopTwinCapture();
 				captureLockStatus.setVal(captureLockStatus.getVal() + 1);
 			}
 
@@ -1407,6 +1492,7 @@ void threadWorker(void *arg)
 			//start capture
 			if (captureStarted) {
 				startCapture();
+				startTwinCapture();
 				captureLockStatus.setVal(captureLockStatus.getVal() - 1);
 			}
         }
@@ -1495,7 +1581,7 @@ void uploadTexture()
 
     if (!transImages.empty())
     {
-        glfwMakeContextCurrent(hiddenWindow);
+        glfwMakeContextCurrent(hiddenTransferWindow);
 
         for (std::size_t i = 0; i < transImages.size(); i++)
         {
@@ -1642,15 +1728,22 @@ void parseArguments(int& argc, char**& argv)
         if (strcmp(argv[i], "-host") == 0 && argc > (i + 1))
         {
             gCapture->setVideoHost(std::string(argv[i + 1]));
+			gTwinCapture->setVideoHost(std::string(argv[i + 1]));
         }
         else if (strcmp(argv[i], "-video") == 0 && argc > (i + 1))
         {
             gCapture->setVideoDevice(std::string(argv[i + 1]));
         }
+		else if (strcmp(argv[i], "-dualvideo") == 0 && argc > (i + 2))
+		{
+			gTwinCapture->setVideoDevices(std::string(argv[i + 1]), std::string(argv[i + 2]));
+		}
         else if (strcmp(argv[i], "-option") == 0 && argc > (i + 2))
         {
             gCapture->addOption(
                 std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
+			gTwinCapture->addOption(
+				std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
         }
         else if (strcmp(argv[i], "-flip") == 0)
         {
@@ -1713,7 +1806,36 @@ GLuint allocateCaptureTexture()
 	return texId;
 }
 
-void uploadData(uint8_t ** data, int width, int height)
+GLuint allocateTwinCaptureTexture()
+{
+	int w = gTwinCapture->getWidth();
+	int h = gTwinCapture->getHeight();
+	h *= 2;
+
+	if (w * h <= 0)
+	{
+		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Invalid texture size (%dx%d)!\n", w, h);
+		return 0;
+	}
+
+	GLuint texId;
+	glGenTextures(1, &texId);
+	glBindTexture(GL_TEXTURE_2D, texId);
+
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, w, h);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	return texId;
+}
+
+void uploadCaptureData(uint8_t ** data, int width, int height)
 {
     // At least two textures and GLSync objects
     // should be used to control that the uploaded texture is the same
@@ -1832,13 +1954,58 @@ void uploadData(uint8_t ** data, int width, int height)
 		}
 #endif
 
-        calculateStats();
+        //calculateStats();
     }
+}
+
+void uploadTwinCaptureData(uint8_t ** data, int width, int height, int idx)
+{
+	// At least two textures and GLSync objects
+	// should be used to control that the uploaded texture is the same
+	// for all viewports to prevent any tearing and maintain frame sync
+
+	unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
+	if (GPU_ptr)
+	{
+		int dataOffset = 0;
+		int stride = width * 3;
+
+		if (flipFrame)
+		{
+			for (int row = 0; row < height; row++)
+			{
+				memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+				dataOffset += stride;
+			}
+		}
+		else
+		{
+			for (int row = height - 1; row > -1; row--)
+			{
+				memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+				dataOffset += stride;
+			}
+		}
+
+		glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, twinCaptureTexId);
+
+		if (idx == 0) {
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+		}
+		else {
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, height, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+		}
+	}
+
+	//calculateStats();
 }
 
 void captureLoop(void *arg)
 {
-    glfwMakeContextCurrent(hiddenWindow);
+    glfwMakeContextCurrent(hiddenCaptureWindow);
 
     int dataSize = gCapture->getWidth() * gCapture->getHeight() * 3;
     GLuint PBO;
@@ -1858,6 +2025,30 @@ void captureLoop(void *arg)
     glDeleteBuffers(1, &PBO);
 
     glfwMakeContextCurrent(NULL); //detach context
+}
+
+void twinCaptureLoop(void *arg)
+{
+	glfwMakeContextCurrent(hiddenTwinCaptureWindow);
+
+	int dataSize = gTwinCapture->getWidth() * gTwinCapture->getHeight() * 3;
+	GLuint PBO;
+	glGenBuffers(1, &PBO);
+
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
+	glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
+
+	while (twinCaptureRunning.getVal())
+	{
+		gTwinCapture->poll();
+		sgct::Engine::sleep(0.02); //take a short break to offload the cpu
+	}
+
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+	glDeleteBuffers(1, &PBO);
+
+	glfwMakeContextCurrent(NULL); //detach context
 }
 
 void calculateStats()

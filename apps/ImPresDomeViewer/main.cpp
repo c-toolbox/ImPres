@@ -1964,13 +1964,15 @@ void uploadTwinCaptureData(uint8_t ** data, int width, int height, int idx)
 	// should be used to control that the uploaded texture is the same
 	// for all viewports to prevent any tearing and maintain frame sync
 
+	bool flip = (idx == 0 ? flipFrame : !flipFrame);
+
 	unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
 	if (GPU_ptr)
 	{
 		int dataOffset = 0;
 		int stride = width * 3;
 
-		if (flipFrame)
+		if (flip)
 		{
 			for (int row = 0; row < height; row++)
 			{

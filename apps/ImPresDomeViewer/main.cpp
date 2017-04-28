@@ -96,7 +96,8 @@ std::vector<std::string> split(const std::string &s, char delim) {
 
 sgct::Engine * gEngine;
 Capture * gCapture = NULL;
-TwinCapture * gTwinCapture = NULL;
+Capture * gFisheyeCapture = NULL;
+TwinCapture * gFisheyeTwinCapture = NULL;
 
 //sgct callbacks
 void myPreSyncFun();
@@ -119,7 +120,7 @@ std::vector<sgct_utils::SGCTPlane *> masterContentPlanes;
 sgct_utils::SGCTDome * dome = NULL;
 
 GLFWwindow * hiddenCaptureWindow;
-GLFWwindow * hiddenTwinCaptureWindow;
+GLFWwindow * hiddenFisheyeCaptureWindow;
 GLFWwindow * hiddenTransferWindow;
 GLFWwindow * sharedWindow;
 
@@ -205,17 +206,20 @@ const int headerSize = 1;
 
 //FFmpegCapture
 void uploadCaptureData(uint8_t ** data, int width, int height);
-void uploadTwinCaptureData(uint8_t ** data, int width, int height, int idx);
+void uploadFisheyeCaptureData(uint8_t ** data, int width, int height);
+void uploadFisheyeTwinCaptureData(uint8_t ** data, int width, int height, int idx);
 void parseArguments(int& argc, char**& argv);
 GLuint allocateCaptureTexture();
-GLuint allocateTwinCaptureTexture();
+GLuint allocateFisheyeCaptureTexture();
+GLuint allocateFisheyeTwinCaptureTexture();
 void captureLoop(void *arg);
-void twinCaptureLoop(void *arg);
+void fisheyeSingleCaptureLoop(void *arg);
+void fisheyeTwinCaptureLoop(void *arg);
 void calculateStats();
 void startCapture();
 void stopCapture();
-void startTwinCapture();
-void stopTwinCapture();
+void startFisheyeCapture();
+void stopFisheyeCapture();
 void createPlanes();
 
 GLint Matrix_Loc = -1;
@@ -233,10 +237,11 @@ GLint Opacity_Loc_CK = -1;
 GLint ChromaKeyColor_Loc_CK = -1;
 GLint ChromaKeyFactor_Loc_CK = -1;
 GLuint captureTexId = GL_FALSE;
-GLuint twinCaptureTexId = GL_FALSE;
+GLuint fisheyeCaptureTexId = GL_FALSE;
 
 tthread::thread * captureThread;
-tthread::thread * twinCaptureThread;
+tthread::thread * fisheyeCaptureThread;
+bool usingTwinFisheye = false;
 bool flipFrame = false;
 bool fulldomeMode = false;
 
@@ -244,7 +249,7 @@ glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
 
 sgct::SharedBool captureRunning(true);
-sgct::SharedBool twinCaptureRunning(true);
+sgct::SharedBool fisheyeCaptureLoop(true);
 sgct::SharedInt captureLockStatus(0);
 sgct::SharedBool renderDome(fulldomeMode);
 sgct::SharedDouble captureRate(0.0);
@@ -290,7 +295,8 @@ int main( int argc, char* argv[] )
     
     gEngine = new sgct::Engine( argc, argv );
     gCapture = new Capture();
-	gTwinCapture = new TwinCapture();
+	gFisheyeCapture = new Capture();
+	gFisheyeTwinCapture = new TwinCapture();
 
     // arguments:
     // -host <host which should capture>
@@ -351,8 +357,8 @@ int main( int argc, char* argv[] )
 	if(captureRunning.getVal())
 		stopCapture();
 
-	if (twinCaptureRunning.getVal())
-		stopTwinCapture();
+	if (fisheyeCaptureLoop.getVal())
+		stopFisheyeCapture();
 
     running.setVal(false);
     if (loadThread)
@@ -367,7 +373,8 @@ int main( int argc, char* argv[] )
 
     // Clean up
     delete gCapture;
-	delete gTwinCapture;
+	delete gFisheyeCapture;
+	delete gFisheyeTwinCapture;
     delete gEngine;
 
     // Exit program
@@ -593,7 +600,7 @@ void myDraw3DFun()
 	bool captureStarted = captureRunning.getVal();
 	if (captureStarted && captureLockStatus.getVal() == 1) {
 		stopCapture();
-		stopTwinCapture();
+		stopFisheyeCapture();
 	}
 
 	//No capture planes when taking screenshot
@@ -641,18 +648,20 @@ void myDraw3DFun()
 				}
 
 				float planeOpacity = getContentPlaneOpacity(i);
-				glUniform1f(Opacity_L, planeOpacity);
+				if (planeOpacity > 0.f) {
+					glUniform1f(Opacity_L, planeOpacity);
 
-				glm::mat4 capturePlaneTransform = glm::mat4(1.0f);
-				capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-				capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-				capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-				capturePlaneTransform = glm::translate(capturePlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+					glm::mat4 capturePlaneTransform = glm::mat4(1.0f);
+					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+					capturePlaneTransform = glm::translate(capturePlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
 
-				capturePlaneTransform = MVP * capturePlaneTransform;
-				glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &capturePlaneTransform[0][0]);
+					capturePlaneTransform = MVP * capturePlaneTransform;
+					glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &capturePlaneTransform[0][0]);
 
-				captureContentPlanes[i]->draw();
+					captureContentPlanes[i]->draw();
+				}
 			}
 		}
 	}
@@ -749,7 +758,7 @@ void myDraw2DFun()
 			ImGui::Checkbox("Use Capture Size For Aspect Ratio", &imPlaneUseCaptureSize);
 			if (!imPlaneCapturePresMode) {
 				if (ImGui::Button("Add New Plane")) {
-					std::string name = "Content " + std::to_string((imPlanes.size() - 1));
+					std::string name = "Content " + std::to_string((imPlanes.size() - 4));
 					imPlanes.push_back(name);
 					planeAttributes.addVal(ContentPlane(name, 1.6f, 0.f, 85.f, 0.f));
 				}
@@ -806,24 +815,28 @@ void stopCapture()
 	}
 }
 
-void startTwinCapture()
+void startFisheyeCapture()
 {
 	//start capture thread if host or load thread if master and not host
-	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
-	if (thisNode->getAddress() == gTwinCapture->getVideoHost()) {
-		twinCaptureRunning.setVal(true);
-		twinCaptureThread = new (std::nothrow) tthread::thread(twinCaptureLoop, NULL);
+	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();	
+	if (usingTwinFisheye && thisNode->getAddress() == gFisheyeTwinCapture->getVideoHost()) {
+		fisheyeCaptureLoop.setVal(true);
+		fisheyeCaptureThread = new (std::nothrow) tthread::thread(fisheyeTwinCaptureLoop, NULL);
+	}
+	else if (thisNode->getAddress() == gFisheyeCapture->getVideoHost()) {
+		fisheyeCaptureLoop.setVal(true);
+		fisheyeCaptureThread = new (std::nothrow) tthread::thread(fisheyeSingleCaptureLoop, NULL);
 	}
 }
 
-void stopTwinCapture()
+void stopFisheyeCapture()
 {
 	//kill capture thread
-	twinCaptureRunning.setVal(false);
-	if (twinCaptureThread)
+	fisheyeCaptureLoop.setVal(false);
+	if (fisheyeCaptureThread)
 	{
-		twinCaptureThread->join();
-		delete twinCaptureThread;
+		fisheyeCaptureThread->join();
+		delete fisheyeCaptureThread;
 	}
 }
 
@@ -1028,13 +1041,18 @@ void myInitOGLFun()
 		startCapture();
 	}
 
-	bool twinCaptureReady = gTwinCapture->init();
-	//allocate twin texture
-	if (twinCaptureReady) {
-		twinCaptureTexId = allocateTwinCaptureTexture();
+	bool fisheyeCaptureReady = (usingTwinFisheye ? 
+		gFisheyeTwinCapture->init() : gFisheyeCapture->init());
+	//allocate fisheye texture
+	if (fisheyeCaptureReady) {
+		if (usingTwinFisheye) {
+			fisheyeCaptureTexId = allocateFisheyeTwinCaptureTexture();		}
+		else {
+			fisheyeCaptureTexId = allocateFisheyeCaptureTexture();
+		}
 	}
 	domeImageFileNames.push_back("Fisheye Capture");
-	texIds.addVal(twinCaptureTexId);
+	texIds.addVal(fisheyeCaptureTexId);
 	imagePathsVec.push_back(std::pair<std::string, int>("", 0));
 	imagePathsMap.insert(std::pair<std::string, int>(domeImageFileNames[0], 0));
 	lastPackage.setVal(0);
@@ -1042,9 +1060,9 @@ void myInitOGLFun()
 	currentDomeTexIdx = domeTexIndex.getVal();
 	numSyncedTex = 1;
 
-	if (twinCaptureReady) {
+	if (fisheyeCaptureReady) {
 		//start capture
-		startTwinCapture();
+		startFisheyeCapture();
 	}
 
 	//start load thread
@@ -1054,8 +1072,8 @@ void myInitOGLFun()
     std::function<void(uint8_t ** data, int width, int height)> callback = uploadCaptureData;
     gCapture->setVideoDecoderCallback(callback);
 
-	std::function<void(uint8_t ** data, int width, int height, int idx)> twincallback = uploadTwinCaptureData;
-	gTwinCapture->setVideoDecoderCallback(twincallback);
+	std::function<void(uint8_t ** data, int width, int height, int idx)> twincallback = uploadFisheyeTwinCaptureData;
+	gFisheyeTwinCapture->setVideoDecoderCallback(twincallback);
 
 	//define capture planes
 	imPlanes.push_back("FrontCapture");
@@ -1297,8 +1315,8 @@ void myCleanUpFun()
     if(hiddenCaptureWindow)
         glfwDestroyWindow(hiddenCaptureWindow);
 
-	if (hiddenTwinCaptureWindow)
-		glfwDestroyWindow(hiddenTwinCaptureWindow);
+	if (hiddenFisheyeCaptureWindow)
+		glfwDestroyWindow(hiddenFisheyeCaptureWindow);
 
 	if (hiddenTransferWindow)
 		glfwDestroyWindow(hiddenTransferWindow);
@@ -1397,8 +1415,8 @@ void myContextCreationCallback(GLFWwindow * win)
         sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
     }
 
-	hiddenTwinCaptureWindow = glfwCreateWindow(1, 1, "Thread TwinCapture Window", NULL, sharedWindow);
-	if (!hiddenTwinCaptureWindow)
+	hiddenFisheyeCaptureWindow = glfwCreateWindow(1, 1, "Thread TwinCapture Window", NULL, sharedWindow);
+	if (!hiddenFisheyeCaptureWindow)
 	{
 		sgct::MessageHandler::instance()->print("Failed to create twin capture context!\n");
 	}
@@ -1423,7 +1441,7 @@ void myDataTransferDecoder(void * receivedData, int receivedlength, int packageI
 	bool captureStarted = captureRunning.getVal();
 	if (captureStarted) {
 		stopCapture();
-		stopTwinCapture();
+		stopFisheyeCapture();
 		captureLockStatus.setVal(captureLockStatus.getVal() + 1);
 	}
     
@@ -1434,7 +1452,7 @@ void myDataTransferDecoder(void * receivedData, int receivedlength, int packageI
 	//start capture
 	if (captureStarted) {
 		startCapture();
-		startTwinCapture();
+		startFisheyeCapture();
 		captureLockStatus.setVal(captureLockStatus.getVal() - 1);
 	}
 }
@@ -1473,7 +1491,7 @@ void threadWorker(void *arg)
 			bool captureStarted = captureRunning.getVal();
 			if (captureStarted) {
 				stopCapture();
-				stopTwinCapture();
+				stopFisheyeCapture();
 				captureLockStatus.setVal(captureLockStatus.getVal() + 1);
 			}
 
@@ -1492,7 +1510,7 @@ void threadWorker(void *arg)
 			//start capture
 			if (captureStarted) {
 				startCapture();
-				startTwinCapture();
+				startFisheyeCapture();
 				captureLockStatus.setVal(captureLockStatus.getVal() - 1);
 			}
         }
@@ -1728,23 +1746,35 @@ void parseArguments(int& argc, char**& argv)
         if (strcmp(argv[i], "-host") == 0 && argc > (i + 1))
         {
             gCapture->setVideoHost(std::string(argv[i + 1]));
-			gTwinCapture->setVideoHost(std::string(argv[i + 1]));
+			gFisheyeTwinCapture->setVideoHost(std::string(argv[i + 1]));
+			gFisheyeCapture->setVideoHost(std::string(argv[i + 1]));
         }
         else if (strcmp(argv[i], "-video") == 0 && argc > (i + 1))
         {
             gCapture->setVideoDevice(std::string(argv[i + 1]));
         }
-		else if (strcmp(argv[i], "-dualvideo") == 0 && argc > (i + 2))
+		else if (strcmp(argv[i], "-option") == 0 && argc > (i + 2))
 		{
-			gTwinCapture->setVideoDevices(std::string(argv[i + 1]), std::string(argv[i + 2]));
-		}
-        else if (strcmp(argv[i], "-option") == 0 && argc > (i + 2))
-        {
-            gCapture->addOption(
-                std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
-			gTwinCapture->addOption(
+			gCapture->addOption(
 				std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
-        }
+		}
+		else if (strcmp(argv[i], "-fisheyevideo") == 0 && argc > (i + 2))
+		{
+			usingTwinFisheye = true;
+			gFisheyeTwinCapture->setVideoDevices(std::string(argv[i + 1]), std::string(argv[i + 2]));
+		}
+		else if (strcmp(argv[i], "-fisheyevideo") == 0 && argc > (i + 1))
+		{
+			usingTwinFisheye = false;
+			gFisheyeCapture->setVideoDevice(std::string(argv[i + 1]));
+		}
+		else if (strcmp(argv[i], "-fisheyeoption") == 0 && argc > (i + 2))
+		{
+			gFisheyeTwinCapture->addOption(
+				std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
+			gFisheyeCapture->addOption(
+				std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
+		}
         else if (strcmp(argv[i], "-flip") == 0)
         {
             flipFrame = true;
@@ -1806,10 +1836,38 @@ GLuint allocateCaptureTexture()
 	return texId;
 }
 
-GLuint allocateTwinCaptureTexture()
+GLuint allocateFisheyeCaptureTexture()
 {
-	int w = gTwinCapture->getWidth();
-	int h = gTwinCapture->getHeight();
+	int w = gFisheyeCapture->getWidth();
+	int h = gFisheyeCapture->getHeight();
+
+	if (w * h <= 0)
+	{
+		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Invalid texture size (%dx%d)!\n", w, h);
+		return 0;
+	}
+
+	GLuint texId;
+	glGenTextures(1, &texId);
+	glBindTexture(GL_TEXTURE_2D, texId);
+
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, w, h);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	return texId;
+}
+
+GLuint allocateFisheyeTwinCaptureTexture()
+{
+	int w = gFisheyeTwinCapture->getWidth();
+	int h = gFisheyeTwinCapture->getHeight();
 	h *= 2;
 
 	if (w * h <= 0)
@@ -1958,7 +2016,46 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
     }
 }
 
-void uploadTwinCaptureData(uint8_t ** data, int width, int height, int idx)
+void uploadFisheyeCaptureData(uint8_t ** data, int width, int height)
+{
+	// At least two textures and GLSync objects
+	// should be used to control that the uploaded texture is the same
+	// for all viewports to prevent any tearing and maintain frame sync
+
+	unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
+	if (GPU_ptr)
+	{
+		int dataOffset = 0;
+		int stride = width * 3;
+
+		if (flipFrame)
+		{
+			for (int row = 0; row < height; row++)
+			{
+				memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+				dataOffset += stride;
+			}
+		}
+		else
+		{
+			for (int row = height - 1; row > -1; row--)
+			{
+				memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+				dataOffset += stride;
+			}
+		}
+
+		glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, fisheyeCaptureTexId);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+	}
+
+	//calculateStats();
+}
+
+void uploadFisheyeTwinCaptureData(uint8_t ** data, int width, int height, int idx)
 {
 	// At least two textures and GLSync objects
 	// should be used to control that the uploaded texture is the same
@@ -1992,7 +2089,7 @@ void uploadTwinCaptureData(uint8_t ** data, int width, int height, int idx)
 		glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
 
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, twinCaptureTexId);
+		glBindTexture(GL_TEXTURE_2D, fisheyeCaptureTexId);
 
 		if (idx == 0) {
 			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
@@ -2029,20 +2126,44 @@ void captureLoop(void *arg)
     glfwMakeContextCurrent(NULL); //detach context
 }
 
-void twinCaptureLoop(void *arg)
+void fisheyeSingleCaptureLoop(void *arg)
 {
-	glfwMakeContextCurrent(hiddenTwinCaptureWindow);
+	glfwMakeContextCurrent(hiddenFisheyeCaptureWindow);
 
-	int dataSize = gTwinCapture->getWidth() * gTwinCapture->getHeight() * 3;
+	int dataSize = gFisheyeCapture->getWidth() * gFisheyeCapture->getHeight() * 3;
 	GLuint PBO;
 	glGenBuffers(1, &PBO);
 
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
 	glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
 
-	while (twinCaptureRunning.getVal())
+	while (fisheyeCaptureLoop.getVal())
 	{
-		gTwinCapture->poll();
+		gFisheyeCapture->poll();
+		sgct::Engine::sleep(0.02); //take a short break to offload the cpu
+	}
+
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+	glDeleteBuffers(1, &PBO);
+
+	glfwMakeContextCurrent(NULL); //detach context
+}
+
+void fisheyeTwinCaptureLoop(void *arg)
+{
+	glfwMakeContextCurrent(hiddenFisheyeCaptureWindow);
+
+	int dataSize = gFisheyeTwinCapture->getWidth() * gFisheyeTwinCapture->getHeight() * 3;
+	GLuint PBO;
+	glGenBuffers(1, &PBO);
+
+	glBindBuffer(GL_PIXEL_UNPACK_BUFFER, PBO);
+	glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
+
+	while (fisheyeCaptureLoop.getVal())
+	{
+		gFisheyeTwinCapture->poll();
 		sgct::Engine::sleep(0.02); //take a short break to offload the cpu
 	}
 

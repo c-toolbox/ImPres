@@ -45,6 +45,9 @@ TwinCapture::TwinCapture()
 
 	mDstPixFmt = AV_PIX_FMT_BGR24;
 	mInited = false;
+
+	mFormatYUVY422 = false;
+	mFormatBGR24 = false;
 }
 
 TwinCapture::~TwinCapture()
@@ -69,7 +72,17 @@ int TwinCapture::getHeight() const
 
 const char * TwinCapture::getFormat() const
 {
-	return mVideoStrFormat.c_str();
+	return mVideoDstFormat.c_str();
+}
+
+int TwinCapture::isFormatYUYV422() const
+{
+	return mFormatYUVY422;
+}
+
+int TwinCapture::isFormatBGR24() const
+{
+	return mFormatBGR24;
 }
 
 std::size_t TwinCapture::getNumberOfDecodedFrames() const
@@ -175,6 +188,16 @@ void TwinCapture::setVideoDecoderCallback(std::function<void(uint8_t ** data, in
 void TwinCapture::addOption(std::pair<std::string, std::string> option)
 {
 	mUserOptions.push_back(option);
+	if (option.first.c_str() == "pixel_format") {
+		if (option.second.c_str() == "yuyv422") {
+			mDstPixFmt = AV_PIX_FMT_YUYV422;
+			mFormatYUVY422 = true;
+		}
+		else if (option.second.c_str() == "bgr24") {
+			mDstPixFmt = AV_PIX_FMT_BGR24;
+			mFormatBGR24 = true;
+		}
+	}
 }
 
 bool TwinCapture::poll()
@@ -342,6 +365,17 @@ bool TwinCapture::allocateVideoDecoderData(AVPixelFormat pix_fmt)
 			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Could not allocate frame convertion context!\n");
 			return false;
 		}
+	}
+	else {
+		char buf[256];
+		std::size_t found;
+
+		mVideoStrFormat = std::string(av_get_pix_fmt_string(buf, 256, pix_fmt));
+		found = mVideoStrFormat.find(' ');
+		if (found != std::string::npos)
+			mVideoStrFormat = mVideoStrFormat.substr(0, found); //delate inrelevant data
+
+		mVideoDstFormat = mVideoStrFormat;
 	}
 
 	mTempFrame = av_frame_alloc();

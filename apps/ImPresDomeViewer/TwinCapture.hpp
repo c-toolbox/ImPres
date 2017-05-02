@@ -32,6 +32,8 @@ public:
 	int getWidth() const;
 	int getHeight() const;
 	const char * getFormat() const;
+	int isFormatYUYV422() const;
+	int isFormatBGR24() const;
 	std::size_t getNumberOfDecodedFrames() const;
 
 private:
@@ -66,6 +68,9 @@ private:
 	std::string mVideoDstFormat;
 	std::string mVideoStrFormat;
 	std::vector< std::pair<std::string, std::string> > mUserOptions;
+
+	bool mFormatYUVY422;
+	bool mFormatBGR24;
 
 	//callback function pointer
 	std::function<void(uint8_t ** data, int width, int height, int idx)> mVideoDecoderCallback;

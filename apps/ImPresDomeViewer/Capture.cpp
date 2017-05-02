@@ -39,6 +39,9 @@ Capture::Capture()
 
 	mDstPixFmt = AV_PIX_FMT_BGR24;
 	mInited = false;
+
+	mFormatYUVY422 = false;
+	mFormatBGR24 = false;
 }
 
 Capture::~Capture()
@@ -63,7 +66,17 @@ int Capture::getHeight() const
 
 const char * Capture::getFormat() const
 {
-	return mVideoStrFormat.c_str();
+	return mVideoDstFormat.c_str();
+}
+
+int Capture::isFormatYUYV422() const 
+{
+	return mFormatYUVY422;
+}
+
+int Capture::isFormatBGR24() const 
+{
+	return mFormatBGR24;
 }
 
 std::size_t Capture::getNumberOfDecodedFrames() const
@@ -164,6 +177,16 @@ void Capture::setVideoDecoderCallback(std::function<void(uint8_t ** data, int wi
 void Capture::addOption(std::pair<std::string, std::string> option)
 {
 	mUserOptions.push_back(option);
+	if (option.first.c_str() == "pixel_format") {
+		if (option.second.c_str() == "yuyv422") {
+			mDstPixFmt = AV_PIX_FMT_YUYV422;
+			mFormatYUVY422 = true;
+		}
+		else if (option.second.c_str() == "bgr24") {
+			mDstPixFmt = AV_PIX_FMT_BGR24;
+			mFormatBGR24 = true;
+		}
+	}
 }
 
 bool Capture::poll()
@@ -326,6 +349,17 @@ bool Capture::allocateVideoDecoderData(AVPixelFormat pix_fmt)
 			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Could not allocate frame convertion context!\n");
 			return false;
 		}
+	}
+	else {
+		char buf[256];
+		std::size_t found;
+
+		mVideoStrFormat = std::string(av_get_pix_fmt_string(buf, 256, pix_fmt));
+		found = mVideoStrFormat.find(' ');
+		if (found != std::string::npos)
+			mVideoStrFormat = mVideoStrFormat.substr(0, found); //delate inrelevant data
+
+		mVideoDstFormat = mVideoStrFormat;
 	}
 
 	mTempFrame = av_frame_alloc();

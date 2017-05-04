@@ -1104,19 +1104,19 @@ void myInitOGLFun()
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("LeftCapture");
-	ContentPlane leftCapture = ContentPlane("LeftCapture", imPlaneHeight, -70.f, imPlaneElevation, imPlaneRoll, false);
+	ContentPlane leftCapture = ContentPlane("LeftCapture", -2.865, -75.135f, 26.486f, imPlaneRoll, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(leftCapture);
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("RightCapture");
-	ContentPlane rightCapture = ContentPlane("RightCapture", imPlaneHeight, 70.f, imPlaneElevation, imPlaneRoll, false);
+	ContentPlane rightCapture = ContentPlane("RightCapture", 2.865, 75.135f, 26.486f, imPlaneRoll, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(rightCapture);
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("TopCapture");
-	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 90.f, imPlaneRoll, false);
+	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135, imPlaneRoll, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributes.addVal(topCapture);
 	captureContentPlanes.push_back(nullptr);
@@ -1376,6 +1376,11 @@ void myKeyCallback(int key, int action)
 		case SGCT_KEY_P:
 			if (action == SGCT_PRESS)
 				fulldomeMode = false;
+			break;
+
+		case SGCT_KEY_SPACE:
+			if (action == SGCT_PRESS)
+				imPlaneShow = !imPlaneShow;
 			break;
 
 		/*case SGCT_KEY_LEFT:

@@ -1065,6 +1065,7 @@ void myInitOGLFun()
 	}
 	domeImageFileNames.push_back("Fisheye Capture");
 	texIds.addVal(fisheyeCaptureTexId);
+	texAspectRatio.addVal(1.f);
 	imagePathsVec.push_back(std::pair<std::string, int>("", 0));
 	imagePathsMap.insert(std::pair<std::string, int>(domeImageFileNames[0], 0));
 	lastPackage.setVal(0);

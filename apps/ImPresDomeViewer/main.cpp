@@ -168,10 +168,10 @@ void transferSupportedFiles(std::string pathStr);
 void startDataTransfer();
 void readImage(unsigned char * data, int len);
 void uploadTexture();
-void threadWorker(void *arg);
+void threadWorker();
 
-tthread::thread * loadThread;
-tthread::mutex mutex;
+std::thread * loadThread;
+std::mutex mutex;
 std::vector<sgct_core::Image *> transImages;
 
 sgct::SharedInt32 domeTexIndex(-1);
@@ -212,9 +212,9 @@ void parseArguments(int& argc, char**& argv);
 GLuint allocateCaptureTexture();
 GLuint allocateFisheyeCaptureTexture();
 GLuint allocateFisheyeTwinCaptureTexture();
-void captureLoop(void *arg);
-void fisheyeCaptureLoop1(void *arg);
-void fisheyeCaptureLoop2(void *arg);
+void captureLoop();
+void fisheyeCaptureLoop1();
+void fisheyeCaptureLoop2();
 void calculateStats();
 void startCapture();
 void stopCapture();
@@ -239,9 +239,9 @@ GLint ChromaKeyFactor_Loc_CK = -1;
 GLuint captureTexId = GL_FALSE;
 GLuint fisheyeCaptureTexId = GL_FALSE;
 
-tthread::thread * captureThread;
-tthread::thread * fisheyeCapture1Thread;
-tthread::thread * fisheyeCapture2Thread;
+std::thread * captureThread;
+std::thread * fisheyeCapture1Thread;
+std::thread * fisheyeCapture2Thread;
 bool usingTwinFisheye = false;
 bool flipFrame = false;
 bool flipFisheye1 = false;
@@ -802,7 +802,7 @@ void startCapture()
 	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
 	if (thisNode->getAddress() == gCapture->getVideoHost()) {
 		captureRunning.setVal(true);
-		captureThread = new (std::nothrow) tthread::thread(captureLoop, NULL);
+		captureThread = new (std::nothrow) std::thread(captureLoop);
 	}
 }
 
@@ -823,11 +823,11 @@ void startFisheyeCapture()
 	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();	
 	if (usingTwinFisheye && thisNode->getAddress() == gFisheyeCapture2->getVideoHost()) {
 		fisheyeCaptureLoop.setVal(true);
-		fisheyeCapture2Thread = new (std::nothrow) tthread::thread(fisheyeCaptureLoop2, NULL);
+		fisheyeCapture2Thread = new (std::nothrow) std::thread(fisheyeCaptureLoop2);
 	}
 	if (thisNode->getAddress() == gFisheyeCapture1->getVideoHost()) {
 		fisheyeCaptureLoop.setVal(true);
-		fisheyeCapture1Thread = new (std::nothrow) tthread::thread(fisheyeCaptureLoop1, NULL);
+		fisheyeCapture1Thread = new (std::nothrow) std::thread(fisheyeCaptureLoop1);
 	}
 }
 
@@ -1080,7 +1080,7 @@ void myInitOGLFun()
 
 	//start load thread
     if (gEngine->isMaster())
-        loadThread = new (std::nothrow) tthread::thread(threadWorker, NULL);
+        loadThread = new (std::nothrow) std::thread(threadWorker);
 
     std::function<void(uint8_t ** data, int width, int height)> callback = uploadCaptureData;
     gCapture->setVideoDecoderCallback(callback);
@@ -1512,7 +1512,7 @@ void myDataTransferAcknowledge(int packageId, int clientIndex)
     }
 }
 
-void threadWorker(void *arg)
+void threadWorker()
 {
     while (running.getVal())
     {
@@ -2185,7 +2185,7 @@ void uploadFisheye2CaptureData(uint8_t ** data, int width, int height)
 	//calculateStats();
 }
 
-void captureLoop(void *arg)
+void captureLoop()
 {
     glfwMakeContextCurrent(hiddenCaptureWindow);
 
@@ -2209,7 +2209,7 @@ void captureLoop(void *arg)
     glfwMakeContextCurrent(NULL); //detach context
 }
 
-void fisheyeCaptureLoop1(void *arg)
+void fisheyeCaptureLoop1()
 {
 	glfwMakeContextCurrent(hiddenFisheyeCapture1Window);
 
@@ -2233,7 +2233,7 @@ void fisheyeCaptureLoop1(void *arg)
 	glfwMakeContextCurrent(NULL); //detach context
 }
 
-void fisheyeCaptureLoop2(void *arg)
+void fisheyeCaptureLoop2()
 {
 	glfwMakeContextCurrent(hiddenFisheyeCapture2Window);
 

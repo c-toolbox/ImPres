@@ -75,6 +75,36 @@ else()
 	set(IMPRES_ZXING_SRC "")
 endif()
 
+# RGBEasy Specific
+if(NOT RGBEASY_INCLUDE_DIRECTORY)
+    if( WIN32 )
+        find_path(RGBEASY_INCLUDE_DIRECTORY
+            NAMES RGBAPI.h
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/additional_includes/RGBEasy NO_DEFAULT_PATH
+            REQUIRED)
+    else()
+        find_path(RGBEASY_INCLUDE_DIRECTORY
+            NAMES RGBAPI.h
+            PATH_SUFFIXES RGBEasy
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/additional_includes/RGBEasy
+            REQUIRED)
+    endif()
+endif()
+if(NOT RGBEASY_LIBARIES_DIRECTORY)
+    if( WIN32 )
+        find_path(RGBEASY_LIBARIES_DIRECTORY
+            NAMES RGBEasyLibs.txt
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/additional_libs/RGBEasy NO_DEFAULT_PATH
+            REQUIRED)
+    else()
+        find_path(RGBEASY_LIBARIES_DIRECTORY
+            NAMES RGBEasyLibs.txt
+            PATH_SUFFIXES RGBEasy
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/additional_libs/RGBEasy
+            REQUIRED)
+    endif()
+endif()
+
 ##OpenVR section start####################
 option(OPENVR_SUPPORT "Build ImPres application with OpenVR support" OFF)
 if(OPENVR_SUPPORT)
@@ -111,6 +141,8 @@ add_executable(${APP_NAME}
 	main.cpp
 	FFmpegCapture.cpp
 	FFmpegCapture.hpp
+	RGBEasyCapture.cpp
+	RGBEasyCapture.hpp
 	${IMGUI_INCLUDE_DIRECTORY}/imconfig.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_internal.h
@@ -176,6 +208,23 @@ set(SGCT_LIBS
 	optimized ${SGCT_RELEASE_LIBRARY}
 )
 
+set(RGBEASY_LIBS ${RGBEASY_LIBARIES_DIRECTORY}/RGBEASY.LIB)
+if( WIN32 )
+	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+		# 64 bits
+		set(RGBEASY_LIBS
+			debug ${RGBEASY_LIBARIES_DIRECTORY}/x64/Debug/RGBEASY.LIB
+			optimized ${RGBEASY_LIBARIES_DIRECTORY}/x64/Release/RGBEASY.LIB
+		)
+	elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+		# 32 bits
+		set(RGBEASY_LIBS
+			debug ${RGBEASY_LIBARIES_DIRECTORY}/Win32/Debug/RGBEASY.LIB
+			optimized ${RGBEASY_LIBARIES_DIRECTORY}/Win32/Release/RGBEASY.LIB
+		)
+	endif()
+endif()
+
 find_package(OpenGL REQUIRED)
 find_package(FFmpeg REQUIRED)
 
@@ -187,7 +236,7 @@ set(FFMPEG_INCLUDES
 	${FFMPEG_LIBSWSCALE_INCLUDE_DIRS}
 	${FFMPEG_LIBAVRESAMPLE_INCLUDE_DIRS})
 
-include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY} ${OPENVR_INCLUDE_DIRS} ${SGCT_OPENVR_INCLUDE_DIRECTORY})
+include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY} ${OPENVR_INCLUDE_DIRS} ${SGCT_OPENVR_INCLUDE_DIRECTORY} ${RGBEASY_ROOT}/include ${RGBEASY_INCLUDE_DIRECTORY})
 
 set(FFMPEG_LIBS
 	${FFMPEG_LIBAVCODEC_LIBRARIES}
@@ -205,6 +254,7 @@ if( MSVC )
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
 		${OPENVR_LIBRARY}
+		${RGBEASY_LIBS}
 	)
 elseif( WIN32 ) #MINGW or similar
 	set(LIBS
@@ -214,6 +264,7 @@ elseif( WIN32 ) #MINGW or similar
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
 		${OPENVR_LIBRARY}
+		${RGBEASY_LIBS}
 	)
 elseif( APPLE )
 	find_library(COCOA_LIBRARY Cocoa REQUIRED)
@@ -229,6 +280,7 @@ elseif( APPLE )
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
 		${OPENVR_LIBRARY}
+		${RGBEASY_LIBS}
 	)
 else() #linux
 	find_package(X11 REQUIRED)
@@ -246,7 +298,8 @@ else() #linux
 		${CMAKE_THREAD_LIBS_INIT}
 		${FFMPEG_LIBS}
 		${ZXING_LIBRARY}
-		${OPENVR_LIBRARY}		
+		${OPENVR_LIBRARY}
+		${RGBEASY_LIBS}		
 	)
 endif()
 

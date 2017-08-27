@@ -1,1 +1,1 @@
-add_subdirectory(ImPresDomeViewer)
+add_subdirectory(DomePres)

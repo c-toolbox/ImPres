@@ -1,4 +1,4 @@
-ImPres - Immersive Presentation Tool
+DomePres/ImPres - Presentation tool for domes or other immersive environments
 ===========
 
 Minimal effort/time solution for customizable immersive presentation.

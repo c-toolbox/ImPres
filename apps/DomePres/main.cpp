@@ -21,7 +21,7 @@
 #include <iterator>
 #include <algorithm> //used for transform string to lowercase
 #include <sgct.h>
-#include "Capture.hpp"
+#include "FFmpegCapture.hpp"
 
 #ifdef ZXING_ENABLED
 #include "BGR24LuminanceSource.h"
@@ -94,9 +94,9 @@ std::vector<std::string> split(const std::string &s, char delim) {
 }
 
 sgct::Engine * gEngine;
-Capture * gCapture = NULL;
-Capture * gFisheyeCapture1 = NULL;
-Capture * gFisheyeCapture2 = NULL;
+FFmpegCapture* gCapture = NULL;
+FFmpegCapture* gFisheyeCapture1 = NULL;
+FFmpegCapture* gFisheyeCapture2 = NULL;
 
 //sgct callbacks
 void myPreSyncFun();
@@ -297,9 +297,9 @@ int main( int argc, char* argv[] )
     //sgct::MessageHandler::instance()->setNotifyLevel(sgct::MessageHandler::NOTIFY_ALL);
     
     gEngine = new sgct::Engine( argc, argv );
-    gCapture = new Capture();
-	gFisheyeCapture1 = new Capture();
-	gFisheyeCapture2 = new Capture();
+    gCapture = new FFmpegCapture();
+	gFisheyeCapture1 = new FFmpegCapture();
+	gFisheyeCapture2 = new FFmpegCapture();
 
     // arguments:
     // -host <host which should capture>

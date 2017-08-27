@@ -109,8 +109,8 @@ endif()
 
 add_executable(${APP_NAME}
 	main.cpp
-	Capture.cpp
-	Capture.hpp
+	FFmpegCapture.cpp
+	FFmpegCapture.hpp
 	${IMGUI_INCLUDE_DIRECTORY}/imconfig.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_internal.h

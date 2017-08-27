@@ -16,11 +16,11 @@ extern "C"
 #include <vector>
 #include <functional>
 
-class Capture
+class FFmpegCapture
 {
 public:
-	Capture();
-	~Capture();
+	FFmpegCapture();
+	~FFmpegCapture();
 	bool init();
     void setVideoHost(std::string hostAdress);
 	void setVideoDevice(std::string videoDeviceName);

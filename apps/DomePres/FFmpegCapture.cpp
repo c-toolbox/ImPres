@@ -1,4 +1,4 @@
-#include "Capture.hpp"
+#include "FFmpegCapture.hpp"
 #include <sgct.h>
 
 extern "C"
@@ -19,7 +19,7 @@ extern "C"
 	AV_ERROR_MAX_STRING_SIZE, errnum)
 #endif
 
-Capture::Capture()
+FFmpegCapture::FFmpegCapture()
 {
 	mOptions = nullptr;
 	mFMTContext = nullptr;
@@ -44,47 +44,47 @@ Capture::Capture()
 	mFormatBGR24 = false;
 }
 
-Capture::~Capture()
+FFmpegCapture::~FFmpegCapture()
 {
 	cleanup();
 }
 
-std::string Capture::getVideoHost() const
+std::string FFmpegCapture::getVideoHost() const
 {
     return mVideoHost;
 }
 
-int Capture::getWidth() const
+int FFmpegCapture::getWidth() const
 {
 	return mWidth;
 }
 
-int Capture::getHeight() const
+int FFmpegCapture::getHeight() const
 {
 	return mHeight;
 }
 
-const char * Capture::getFormat() const
+const char * FFmpegCapture::getFormat() const
 {
 	return mVideoDstFormat.c_str();
 }
 
-int Capture::isFormatYUYV422() const 
+int FFmpegCapture::isFormatYUYV422() const 
 {
 	return mFormatYUVY422;
 }
 
-int Capture::isFormatBGR24() const 
+int FFmpegCapture::isFormatBGR24() const 
 {
 	return mFormatBGR24;
 }
 
-std::size_t Capture::getNumberOfDecodedFrames() const
+std::size_t FFmpegCapture::getNumberOfDecodedFrames() const
 {
 	return mDecodedVideoFrames;
 }
 
-bool Capture::init()
+bool FFmpegCapture::init()
 {
 	if (mVideoDevice.empty())
 	{
@@ -159,22 +159,22 @@ bool Capture::init()
 	return true;
 }
 
-void Capture::setVideoHost(std::string hostAdress)
+void FFmpegCapture::setVideoHost(std::string hostAdress)
 {
     mVideoHost = hostAdress;
 }
 
-void Capture::setVideoDevice(std::string videoDeviceName)
+void FFmpegCapture::setVideoDevice(std::string videoDeviceName)
 {
 	mVideoDevice = videoDeviceName;
 }
 
-void Capture::setVideoDecoderCallback(std::function<void(uint8_t ** data, int width, int height)> cb)
+void FFmpegCapture::setVideoDecoderCallback(std::function<void(uint8_t ** data, int width, int height)> cb)
 {
 	mVideoDecoderCallback = cb;
 }
 
-void Capture::addOption(std::pair<std::string, std::string> option)
+void FFmpegCapture::addOption(std::pair<std::string, std::string> option)
 {
 	mUserOptions.push_back(option);
 	if (option.first.c_str() == "pixel_format") {
@@ -189,7 +189,7 @@ void Capture::addOption(std::pair<std::string, std::string> option)
 	}
 }
 
-bool Capture::poll()
+bool FFmpegCapture::poll()
 {
 	if (!mInited)
 		return false;
@@ -224,7 +224,7 @@ bool Capture::poll()
 	return all_ok;
 }
 
-void Capture::setupOptions()
+void FFmpegCapture::setupOptions()
 {
 	av_dict_set(&mOptions, "fflags", "nobuffer", 0); //reduce latency
 	av_dict_set(&mOptions, "fflags", "flush_packets", 0); //reduce the latency by flushing out packets immediately
@@ -239,7 +239,7 @@ void Capture::setupOptions()
 	}
 }
 
-void Capture::initFFmpeg()
+void FFmpegCapture::initFFmpeg()
 {
 	//set log level
 	//av_log_set_level(AV_LOG_INFO);
@@ -251,7 +251,7 @@ void Capture::initFFmpeg()
 	//avformat_network_init();
 }
 
-bool Capture::initVideoStream()
+bool FFmpegCapture::initVideoStream()
 {
 	//open video stream
 	if (openCodeContext(mFMTContext, AVMEDIA_TYPE_VIDEO, mVideo_stream_idx) >= 0)
@@ -270,7 +270,7 @@ bool Capture::initVideoStream()
 	return true;
 }
 
-int Capture::openCodeContext(AVFormatContext *fmt_ctx, enum AVMediaType type, int & streamIndex)
+int FFmpegCapture::openCodeContext(AVFormatContext *fmt_ctx, enum AVMediaType type, int & streamIndex)
 {
 	int ret;
 	AVStream *st;
@@ -319,7 +319,7 @@ int Capture::openCodeContext(AVFormatContext *fmt_ctx, enum AVMediaType type, in
 	return 0;
 }
 
-bool Capture::allocateVideoDecoderData(AVPixelFormat pix_fmt)
+bool FFmpegCapture::allocateVideoDecoderData(AVPixelFormat pix_fmt)
 {
 	int ret = 0;
 
@@ -392,7 +392,7 @@ bool Capture::allocateVideoDecoderData(AVPixelFormat pix_fmt)
 	return true;
 }
 
-int Capture::decodePacket(int * gotVideoPtr)
+int FFmpegCapture::decodePacket(int * gotVideoPtr)
 {
 	int ret = 0;
 	int decoded = mPkt.size;
@@ -462,7 +462,7 @@ int Capture::decodePacket(int * gotVideoPtr)
 	return decoded;
 }
 
-void Capture::cleanup()
+void FFmpegCapture::cleanup()
 {
 	mInited = false;
 	mVideoDecoderCallback = nullptr;

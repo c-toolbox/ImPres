@@ -1,5 +1,5 @@
-# ImPresDomeViewer
-ImPresDomeViewer is a an application which combines uses ffmpeg's framegrabber functionality.
+# DomePres
+DomePres is a an application which combines use of primarily ffmpeg's framegrabber functionality.
 
 Arguments:
 
@@ -21,7 +21,7 @@ ffmpeg -f dshow -list_options true -i video=<device name>
 For options look at: http://ffmpeg.org/ffmpeg-devices.html
 
 Example capturing datapath dual link:
-ImPresDomeViewer.exe -config fisheye.xml  -host localhost -video "Datapath VisionDVI-DL Video 01" -option pixel_format bgr24 -option framerate 60 -flip
+DomePres.exe -config fisheye.xml  -host localhost -video "Datapath VisionDVI-DL Video 01" -option pixel_format bgr24 -option framerate 60 -flip
 
 Keyboard keys:
 D - Fulldome mode

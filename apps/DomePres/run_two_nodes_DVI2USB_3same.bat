@@ -1,2 +1,2 @@
-start ImPresDomeViewer.exe -config two_nodes.xml -local 0
-start ImPresDomeViewer.exe -config two_nodes.xml -local 1 --slave -host 127.0.0.2 -video "DVI2USB 3.0 D2S301387" -fisheyetwinvideo "DVI2USB 3.0 D2S301387" "DVI2USB 3.0 D2S301387"
+start DomePres.exe -config two_nodes.xml -local 0
+start DomePres.exe -config two_nodes.xml -local 1 --slave -host 127.0.0.2 -video "DVI2USB 3.0 D2S301387" -fisheyetwinvideo "DVI2USB 3.0 D2S301387" "DVI2USB 3.0 D2S301387"

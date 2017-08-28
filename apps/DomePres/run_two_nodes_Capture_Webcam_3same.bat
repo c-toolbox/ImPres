@@ -1,0 +1,2 @@
+start DomePres.exe -config two_nodes.xml -local 0
+start DomePres.exe -config two_nodes.xml -local 1 --slave -host 127.0.0.2 -video "Logitech Webcam C930e" -option pixel_format yuyv422 -option framerate 30 -dualvideo "Logitech Webcam C930e" "Logitech Webcam C930e"

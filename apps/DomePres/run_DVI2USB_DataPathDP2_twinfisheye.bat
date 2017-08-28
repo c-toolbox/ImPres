@@ -1,0 +1,1 @@
+DomePres.exe -config fisheye.xml -host localhost -video "DVI2USB 3.0 D2S301387" -fisheyetwinvideo "Datapath VisionSC-DP2 Video 02" "Datapath VisionSC-DP2 Video 01" -fisheyeoption pixel_format bgr24 -fisheyeoption framerate 60 -fisheyeflip1 -fisheyeflip2

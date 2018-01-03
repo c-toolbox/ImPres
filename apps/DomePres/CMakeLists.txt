@@ -80,13 +80,13 @@ if(NOT RGBEASY_INCLUDE_DIRECTORY)
     if( WIN32 )
         find_path(RGBEASY_INCLUDE_DIRECTORY
             NAMES RGBAPI.h
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/additional_includes/RGBEasy NO_DEFAULT_PATH
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_includes/RGBEasy NO_DEFAULT_PATH
             REQUIRED)
     else()
         find_path(RGBEASY_INCLUDE_DIRECTORY
             NAMES RGBAPI.h
             PATH_SUFFIXES RGBEasy
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/additional_includes/RGBEasy
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_includes/RGBEasy
             REQUIRED)
     endif()
 endif()
@@ -94,13 +94,13 @@ if(NOT RGBEASY_LIBARIES_DIRECTORY)
     if( WIN32 )
         find_path(RGBEASY_LIBARIES_DIRECTORY
             NAMES RGBEasyLibs.txt
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/additional_libs/RGBEasy NO_DEFAULT_PATH
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_libs/RGBEasy NO_DEFAULT_PATH
             REQUIRED)
     else()
         find_path(RGBEASY_LIBARIES_DIRECTORY
             NAMES RGBEasyLibs.txt
             PATH_SUFFIXES RGBEasy
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/additional_libs/RGBEasy
+            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_libs/RGBEasy
             REQUIRED)
     endif()
 endif()

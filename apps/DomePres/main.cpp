@@ -131,12 +131,51 @@ sgct::SharedBool stats(false);
 sgct::SharedFloat fadingTime(2.0f);
 
 //structs
+struct ContentPlaneGlobalAttribs {
+	std::string name;
+	float height;
+	float azimuth;
+	float elevation;
+	float roll;
+	float distance;
+	int planeStrId;
+	int planeTexId;
+
+	ContentPlaneGlobalAttribs(std::string n, float h, float a, float e, float r, float d, int pls = 0, int pli = 0) :
+		name(n),
+		height(h), 
+		azimuth(a) ,
+		elevation(e) ,
+		roll(r) ,
+		distance (d),
+		planeStrId(pls) ,
+		planeTexId(pli)
+	{};
+};
+
+struct ContentPlaneLocalAttribs {
+	std::string name;
+	bool currentlyVisible;
+	bool previouslyVisible;
+	double fadeStartTime;
+	bool freeze;
+
+	ContentPlaneLocalAttribs(std::string n, bool ca = true, bool pa = true, double f = -1.0, bool fr = false) :
+		name(n),
+		currentlyVisible(ca),
+		previouslyVisible(pa),
+		fadeStartTime(f),
+		freeze(fr)
+	{};
+};
+
 struct ContentPlane {
 	std::string name;
 	float height;
 	float azimuth;
 	float elevation;
 	float roll;
+	float distance;
 	bool currentlyVisible;
 	bool previouslyVisible;
 	double fadeStartTime;
@@ -144,19 +183,28 @@ struct ContentPlane {
 	int planeTexId;
 	bool freeze;
 
-	ContentPlane(std::string n, float h, float a, float e, float r, bool ca = true, bool pa = true, double f = -1.0, int pls = 0, int pli = 0, bool fr = false) :
+	ContentPlane(std::string n, float h, float a, float e, float r, float d, bool ca = true, bool pa = true, double f = -1.0, int pls = 0, int pli = 0, bool fr = false) :
 		name(n),
-		height(h), 
-		azimuth(a) ,
-		elevation(e) ,
-		roll(r) , 
-		currentlyVisible(ca) , 
-		previouslyVisible(pa) ,
-		fadeStartTime(f) ,
-		planeStrId(pls) ,
-		planeTexId(pli) ,
+		height(h),
+		azimuth(a),
+		elevation(e),
+		roll(r),
+		distance(d),
+		currentlyVisible(ca),
+		previouslyVisible(pa),
+		fadeStartTime(f),
+		planeStrId(pls),
+		planeTexId(pli),
 		freeze(fr)
 	{};
+
+	ContentPlaneGlobalAttribs getGlobal() {
+		return ContentPlaneGlobalAttribs(name, height, azimuth, elevation, roll, distance, planeStrId, planeTexId);
+	}
+
+	ContentPlaneLocalAttribs getLocal() {
+		return ContentPlaneLocalAttribs(name, currentlyVisible, previouslyVisible, fadeStartTime, freeze);
+	}
 };
 
 //DomeImageViewer
@@ -266,7 +314,8 @@ sgct::SharedInt planeScreenAspect(1610);
 sgct::SharedInt planeMaterialAspect(169);
 sgct::SharedBool planeCapturePresMode(false);
 sgct::SharedBool planeUseCaptureSize(false);
-sgct::SharedVector<ContentPlane> planeAttributes;
+sgct::SharedVector<ContentPlaneGlobalAttribs> planeAttributesGlobal;
+sgct::SharedVector<ContentPlaneLocalAttribs> planeAttributesLocal;
 sgct::SharedBool planeReCreate(false);
 sgct::SharedBool chromaKey(false);
 sgct::SharedObject<glm::vec3> chromaKeyColor(glm::vec3(0.f, 177.f, 64.f));
@@ -290,6 +339,7 @@ float imPlaneHeight = 3.5f;
 float imPlaneAzimuth = 0.0f;
 float imPlaneElevation = 35.0f;
 float imPlaneRoll = 0.0f;
+float imPlaneDistance = -5.5f;
 bool imPlaneShow = true;
 int imPlaneImageIdx = 0;
 float imFadingTime = 2.0f;
@@ -462,8 +512,8 @@ void myPostSyncPreDrawFun()
 }
 
 float getContentPlaneOpacity(int planeIdx) {
-	std::vector<ContentPlane> pA = planeAttributes.getVal();
-	ContentPlane pl = pA[planeIdx];
+	std::vector<ContentPlaneLocalAttribs> pA = planeAttributesLocal.getVal();
+	ContentPlaneLocalAttribs pl = pA[planeIdx];
 
 	float planeOpacity = 1.f;
 
@@ -472,7 +522,7 @@ float getContentPlaneOpacity(int planeIdx) {
 		pl.previouslyVisible = pl.currentlyVisible;
 		
 		pA[planeIdx] = pl;
-		planeAttributes.setVal(pA);
+		planeAttributesLocal.setVal(pA);
 	}
 
 	if (pl.fadeStartTime != -1.0) {
@@ -496,7 +546,7 @@ float getContentPlaneOpacity(int planeIdx) {
 		if (abort) {
 			pl.fadeStartTime = -1.0;
 			pA[planeIdx] = pl;
-			planeAttributes.setVal(pA);
+			planeAttributesLocal.setVal(pA);
 		}
 	}
 	else if (!pl.currentlyVisible) {
@@ -647,11 +697,11 @@ void myDraw3DFun()
 
 			for (int i = 0; i < captureContentPlanes.size(); i++) {
 				glActiveTexture(GL_TEXTURE0);
-				if (planeAttributes.getVal()[i].freeze) {
+				if (planeAttributesLocal.getVal()[i].freeze) {
 					glBindTexture(GL_TEXTURE_2D, planeTexOwnedIds[i]);
 				}
-				else if (planeAttributes.getVal()[i].planeStrId > 0) {
-					glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
+				else if (planeAttributesGlobal.getVal()[i].planeStrId > 0) {
+					glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributesGlobal.getVal()[i].planeTexId));
 				}
 				else {
 					glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
@@ -662,10 +712,10 @@ void myDraw3DFun()
 					glUniform1f(Opacity_L, planeOpacity);
 
 					glm::mat4 capturePlaneTransform = glm::mat4(1.0f);
-					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-					capturePlaneTransform = glm::translate(capturePlaneTransform, glm::vec3(0.0f, 0.0f, -5.0f)); //distance
+					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributesGlobal.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributesGlobal.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+					capturePlaneTransform = glm::rotate(capturePlaneTransform, glm::radians(planeAttributesGlobal.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+					capturePlaneTransform = glm::translate(capturePlaneTransform, glm::vec3(0.0f, 0.0f, planeAttributesGlobal.getVal()[i].distance)); //distance
 
 					capturePlaneTransform = MVP * capturePlaneTransform;
 					glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &capturePlaneTransform[0][0]);
@@ -677,12 +727,12 @@ void myDraw3DFun()
 	}
 
 	float planeOpacity;
-	for (int i = static_cast<int>(captureContentPlanes.size()); i < planeAttributes.getSize(); i++) {
+	for (int i = static_cast<int>(captureContentPlanes.size()); i < planeAttributesGlobal.getSize(); i++) {
 		planeOpacity = getContentPlaneOpacity(i);
 		if (planeOpacity > 0.f && masterContentPlanes.size() > i-captureContentPlanes.size()) {
 			glActiveTexture(GL_TEXTURE0);
-			if (planeAttributes.getVal()[i].planeStrId > 0) {
-				glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributes.getVal()[i].planeTexId));
+			if (planeAttributesGlobal.getVal()[i].planeStrId > 0) {
+				glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributesGlobal.getVal()[i].planeTexId));
 			}
 			else {
 				glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
@@ -695,10 +745,10 @@ void myDraw3DFun()
 
 			//transform and draw plane
 			glm::mat4 contentPlaneTransform = glm::mat4(1.0f);
-			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
-			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
-			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributes.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
-			contentPlaneTransform = glm::translate(contentPlaneTransform, glm::vec3(0.0f, 0.0f, -5.5f)); //distance
+			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributesGlobal.getVal()[i].azimuth), glm::vec3(0.0f, -1.0f, 0.0f)); //azimuth
+			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributesGlobal.getVal()[i].elevation), glm::vec3(1.0f, 0.0f, 0.0f)); //elevation
+			contentPlaneTransform = glm::rotate(contentPlaneTransform, glm::radians(planeAttributesGlobal.getVal()[i].roll), glm::vec3(0.0f, 0.0f, 1.0f)); //roll
+			contentPlaneTransform = glm::translate(contentPlaneTransform, glm::vec3(0.0f, 0.0f, planeAttributesGlobal.getVal()[i].distance)); //distance
 
 			contentPlaneTransform = MVP * contentPlaneTransform;
 			glUniformMatrix4fv(Matrix_L, 1, GL_FALSE, &contentPlaneTransform[0][0]);
@@ -770,16 +820,21 @@ void myDraw2DFun()
 				if (ImGui::Button("Add New Plane")) {
 					std::string name = "Content " + std::to_string((imPlanes.size() - 4));
 					imPlanes.push_back(name);
-					planeAttributes.addVal(ContentPlane(name, 1.6f, 0.f, 85.f, 0.f));
+					//ContentPlane p(name, 1.6f, 0.f, 85.f, 0.f, -5.5f);
+					planeAttributesGlobal.addVal(ContentPlaneGlobalAttribs(name, 1.6f, 0.f, 85.f, 0.f, -5.5f));
+					planeAttributesLocal.addVal(ContentPlaneLocalAttribs(name));
 				}
-				ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
+			}
+			ImGui::Combo("Currently Editing", &imPlaneIdx, imPlanes);
+			if (!imPlaneCapturePresMode) {
 				ImGui::Checkbox("Show Plane", &imPlaneShow);
 				ImGui::Combo("Plane Source", &imPlaneImageIdx, planeImageFileNames);
-				ImGui::SliderFloat("Plane Height", &imPlaneHeight, 0.1f, 10.0f);
-				ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
-				ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
-				ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
 			}
+			ImGui::SliderFloat("Plane Height", &imPlaneHeight, 0.1f, 10.0f);
+			ImGui::SliderFloat("Plane Azimuth", &imPlaneAzimuth, -180.f, 180.f);
+			ImGui::SliderFloat("Plane Elevation", &imPlaneElevation, -180.f, 180.f);
+			ImGui::SliderFloat("Plane Roll", &imPlaneRoll, -180.f, 180.f);
+			ImGui::SliderFloat("Plane Distance", &imPlaneDistance, -10.f, 0.f);
 			ImGui::Checkbox("Capture Presentation Mode (DomePres)", &imPlaneCapturePresMode);
 			ImGui::Checkbox("Capture Fulldome Mode (Key1=All, Key2=MiddleSquare)", &fulldomeMode);
 			if (ImGui::Button("Export Fisheye To Application Folder")) {
@@ -973,30 +1028,30 @@ void createPlanes() {
 	float captureRatio = (static_cast<float>(gPlaneCapture->getWidth()) / static_cast<float>(gPlaneCapture->getHeight()));
 
 	for (int i = 0; i < capturePlaneSize; i++) {
-		float planeWidth = planeAttributes.getVal()[i].height * captureRatio;
+		float planeWidth = planeAttributesGlobal.getVal()[i].height * captureRatio;
 
 		if (planeUseCaptureSize.getVal())
 		{
-			captureContentPlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
+			captureContentPlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributesGlobal.getVal()[i].height));
 		}
 		else
 		{
 			switch (planeMaterialAspect.getVal())
 			{
 			case 1610:
-				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 10.0f) * 16.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributesGlobal.getVal()[i].height / 10.0f) * 16.0f, planeAttributesGlobal.getVal()[i].height));
 				break;
 			case 169:
-				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 9.0f) * 16.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributesGlobal.getVal()[i].height / 9.0f) * 16.0f, planeAttributesGlobal.getVal()[i].height));
 				break;
 			case 54:
-				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 4.0f) * 5.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributesGlobal.getVal()[i].height / 4.0f) * 5.0f, planeAttributesGlobal.getVal()[i].height));
 				break;
 			case 43:
-				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributes.getVal()[i].height / 3.0f) * 4.0f, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane((planeAttributesGlobal.getVal()[i].height / 3.0f) * 4.0f, planeAttributesGlobal.getVal()[i].height));
 				break;
 			default:
-				captureContentPlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributes.getVal()[i].height));
+				captureContentPlanes.push_back(new sgct_utils::SGCTPlane(planeWidth, planeAttributesGlobal.getVal()[i].height));
 				break;
 			}
 		}
@@ -1124,9 +1179,9 @@ void createPlanes() {
 	}
 	masterContentPlanes.clear();
 
-	for (size_t i = captureContentPlanes.size(); i < planeAttributes.getSize(); i++) {
-		float width = planeAttributes.getVal()[i].height * texAspectRatio.getValAt(planeAttributes.getVal()[i].planeTexId);
-		masterContentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributes.getVal()[i].height));
+	for (size_t i = captureContentPlanes.size(); i < planeAttributesGlobal.getSize(); i++) {
+		float width = planeAttributesGlobal.getVal()[i].height * texAspectRatio.getValAt(planeAttributesGlobal.getVal()[i].planeTexId);
+		masterContentPlanes.push_back(new sgct_utils::SGCTPlane(width, planeAttributesGlobal.getVal()[i].height));
 	}
 
 	//Reset re-creation
@@ -1201,33 +1256,38 @@ void myInitOGLFun()
 
 	//define capture planes
 	imPlanes.push_back("FrontCapture");
-	ContentPlane frontCapture = ContentPlane("FrontCapture", imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, true);
+	ContentPlane frontCapture = ContentPlane("FrontCapture", imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneDistance, true);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributes.addVal(frontCapture);
+	planeAttributesGlobal.addVal(frontCapture.getGlobal());
+	planeAttributesLocal.addVal(frontCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("BackCapture");
-	ContentPlane backCapture = ContentPlane("BackCapture", 1.8f, -155.f, 20.f, imPlaneRoll, false);
+	ContentPlane backCapture = ContentPlane("BackCapture", 1.8f, -155.f, 20.f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributes.addVal(backCapture);
+	planeAttributesGlobal.addVal(backCapture.getGlobal());
+	planeAttributesLocal.addVal(backCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("LeftCapture");
-	ContentPlane leftCapture = ContentPlane("LeftCapture", -2.865, -75.135f, 26.486f, imPlaneRoll, false);
+	ContentPlane leftCapture = ContentPlane("LeftCapture", -2.865, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributes.addVal(leftCapture);
+	planeAttributesGlobal.addVal(leftCapture.getGlobal());
+	planeAttributesLocal.addVal(leftCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("RightCapture");
-	ContentPlane rightCapture = ContentPlane("RightCapture", 2.865, 75.135f, 26.486f, imPlaneRoll, false);
+	ContentPlane rightCapture = ContentPlane("RightCapture", 2.865, 75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributes.addVal(rightCapture);
+	planeAttributesGlobal.addVal(rightCapture.getGlobal());
+	planeAttributesLocal.addVal(rightCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("TopCapture");
-	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135, imPlaneRoll, false);
+	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributes.addVal(topCapture);
+	planeAttributesGlobal.addVal(topCapture.getGlobal());
+	planeAttributesLocal.addVal(topCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	//define default content plane
@@ -1364,24 +1424,28 @@ void myEncodeFun()
 	planeUseCaptureSize.setVal(imPlaneUseCaptureSize);
 	sgct::SharedData::instance()->writeBool(&planeUseCaptureSize);
 
-	if (!planeCapturePresMode.getVal()) {
-		std::vector<ContentPlane> pA = planeAttributes.getVal();
-		if (imPlaneIdx != imPlanePreviousIdx) {
-			imPlaneHeight = pA[imPlaneIdx].height;
-			imPlaneAzimuth = pA[imPlaneIdx].azimuth;
-			imPlaneElevation = pA[imPlaneIdx].elevation;
-			imPlaneRoll = pA[imPlaneIdx].roll;
-			imPlaneShow = pA[imPlaneIdx].currentlyVisible;
-			imPlanePreviousIdx = imPlaneIdx;
-			imPlaneImageIdx = pA[imPlaneIdx].planeStrId;
-		}
+	std::vector<ContentPlaneGlobalAttribs> pAG = planeAttributesGlobal.getVal();
+	std::vector<ContentPlaneLocalAttribs> pAL = planeAttributesLocal.getVal();
+	if (imPlaneIdx != imPlanePreviousIdx) {
+		imPlaneHeight = pAG[imPlaneIdx].height;
+		imPlaneAzimuth = pAG[imPlaneIdx].azimuth;
+		imPlaneElevation = pAG[imPlaneIdx].elevation;
+		imPlaneRoll = pAG[imPlaneIdx].roll;
+		imPlaneDistance = pAG[imPlaneIdx].distance;
+		imPlaneShow = pAL[imPlaneIdx].currentlyVisible;
+		imPlanePreviousIdx = imPlaneIdx;
+		imPlaneImageIdx = pAG[imPlaneIdx].planeStrId;
+	}
 
-		if (planeAttributes.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
-		if (planeAttributes.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
-		pA[imPlaneIdx] = ContentPlane(pA[imPlaneIdx].name, imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneShow, pA[imPlaneIdx].previouslyVisible,
-			pA[imPlaneIdx].fadeStartTime, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]], pA[imPlaneIdx].freeze);
-		planeAttributes.setVal(pA);
-		sgct::SharedData::instance()->writeVector<ContentPlane>(&planeAttributes);
+	if (planeAttributesGlobal.getVal()[imPlaneIdx].height != imPlaneHeight) planeReCreate.setVal(true);
+	if (planeAttributesGlobal.getVal()[imPlaneIdx].planeStrId != imPlaneImageIdx) planeReCreate.setVal(true);
+	pAG[imPlaneIdx] = ContentPlaneGlobalAttribs(pAG[imPlaneIdx].name, imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneDistance, imPlaneImageIdx, imagePathsMap[planeImageFileNames[imPlaneImageIdx]]);
+	pAL[imPlaneIdx] = ContentPlaneLocalAttribs(pAG[imPlaneIdx].name, imPlaneShow, pAL[imPlaneIdx].previouslyVisible, pAL[imPlaneIdx].fadeStartTime, pAL[imPlaneIdx].freeze);
+	planeAttributesGlobal.setVal(pAG);
+	sgct::SharedData::instance()->writeVector<ContentPlaneGlobalAttribs>(&planeAttributesGlobal);
+	if (!planeCapturePresMode.getVal()) {
+		planeAttributesLocal.setVal(pAL); //Local is same as global on master, but maybe not on slaves.
+		sgct::SharedData::instance()->writeVector<ContentPlaneLocalAttribs>(&planeAttributesLocal);
 	}
 	sgct::SharedData::instance()->writeBool(&planeReCreate);
 
@@ -1408,8 +1472,10 @@ void myDecodeFun()
 	sgct::SharedData::instance()->readInt32(&planeMaterialAspect);
 	sgct::SharedData::instance()->readBool(&planeCapturePresMode);
 	sgct::SharedData::instance()->readBool(&planeUseCaptureSize);
+	sgct::SharedData::instance()->readVector<ContentPlaneGlobalAttribs>(&planeAttributesGlobal);
 	if (!planeCapturePresMode.getVal()) {
-		sgct::SharedData::instance()->readVector<ContentPlane>(&planeAttributes);
+		// If we don't run in CapturePresMode, read local parameters from master as well
+		sgct::SharedData::instance()->readVector<ContentPlaneLocalAttribs>(&planeAttributesLocal);
 	}
 	sgct::SharedData::instance()->readBool(&planeReCreate);
 
@@ -1997,7 +2063,8 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 			}
 		}
 		else {
-			std::vector<ContentPlane> pA = planeAttributes.getVal();
+			std::vector<ContentPlaneLocalAttribs> pAL = planeAttributesLocal.getVal();
+			std::vector<ContentPlaneGlobalAttribs> pAG = planeAttributesGlobal.getVal();
 			if (!operationsQueue.empty()) {
 				// Now we can process them when decodedResults is empty
 				for (size_t i = 0; i < operationsQueue.size(); i++) {
@@ -2006,7 +2073,7 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 					if (operation.size() > 1) {
 						int capturePlaneIdx = -1;
 						for (int p = 0; p < captureContentPlanes.size(); p++) {
-							if (pA[p].name == operation[0]) {
+							if (pAL[p].name == operation[0]) {
 								capturePlaneIdx = p;
 								break;
 							}
@@ -2015,21 +2082,21 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 							for (int o = 1; o < operation.size(); o++) {
 								if (operation[o] == "SetActive") {
 									// Setting capturePlaneIdx as active capture plane
-									pA[capturePlaneIdx].previouslyVisible = false;
-									pA[capturePlaneIdx].freeze = false;
-									pA[capturePlaneIdx].planeTexId = 0;
+									pAL[capturePlaneIdx].previouslyVisible = false;
+									pAL[capturePlaneIdx].freeze = false;
+									pAG[capturePlaneIdx].planeTexId = 0;
 
 									//Freezing other planes which are not already frozen
 									for (int p = 0; p < captureContentPlanes.size(); p++) {
-										if (p != capturePlaneIdx && !pA[p].freeze) {
-											pA[p].freeze = true;
+										if (p != capturePlaneIdx && !pAL[p].freeze) {
+											pAL[p].freeze = true;
 											glCopyImageSubData(planeCaptureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[p], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
 											glFlush();
 										}
 									}
 									
 									// Setting capturePlaneIdx as active capture plane
-									pA[capturePlaneIdx].currentlyVisible = true;
+									pAL[capturePlaneIdx].currentlyVisible = true;
 								}
 							}
 						}
@@ -2038,12 +2105,12 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 								//Making all planes fade out
 								for (int p = 0; p < captureContentPlanes.size(); p++) {
 									//Need to freeze all planes
-									if (!pA[p].freeze) {
-										pA[p].freeze = true;
+									if (!pAL[p].freeze) {
+										pAL[p].freeze = true;
 										glCopyImageSubData(planeCaptureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[p], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
 										glFlush();
 									}
-									pA[p].currentlyVisible = false;
+									pAL[p].currentlyVisible = false;
 								}
 							}
 						}
@@ -2096,7 +2163,7 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 			}
 #ifdef ZXING_ENABLED
 			if (!operationsQueue.empty()) {
-				planeAttributes.setVal(pA);
+				planeAttributesLocal.setVal(pAL);
 				operationsQueue.clear();
 			}
 		}

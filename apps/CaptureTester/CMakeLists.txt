@@ -29,7 +29,7 @@
  #################################################################################
 
 cmake_minimum_required(VERSION 2.8)
-set(APP_NAME DomePres)
+set(APP_NAME CaptureTester)
 
 set(CMAKE_DEBUG_POSTFIX "d" CACHE STRING "add a postfix, usually d on windows")
 set(CMAKE_RELEASE_POSTFIX "" CACHE STRING "add a postfix, usually empty on windows")

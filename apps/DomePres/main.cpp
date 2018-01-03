@@ -336,6 +336,8 @@ std::vector<std::string> operationsQueue;
 #endif
 
 //ImGUI variables
+std::vector<std::string> imPresets;
+int imPresetIdx = 0;
 std::vector<std::string> imPlanes;
 int imPlaneIdx = 0;
 int imPlanePreviousIdx = 0;
@@ -806,6 +808,80 @@ void myDraw2DFun()
 	if (gEngine->isMaster() && !screenshotPassOn && drawGUI)
 	{
 		ImGui_ImplGlfwGL3_NewFrame(gEngine->getCurrentWindowPtr()->getXFramebufferResolution(), gEngine->getCurrentWindowPtr()->getYFramebufferResolution());
+
+		std::string menu_action = "";
+		if (ImGui::BeginMainMenuBar())
+		{
+			if (ImGui::BeginMenu("File"))
+			{
+				if (ImGui::MenuItem("Load Preset...")) menu_action = "Load";
+				if (ImGui::MenuItem("Save Preset...")) menu_action = "SaveAs";
+
+				ImGui::EndMenu();
+			}
+
+			ImGui::EndMainMenuBar();
+		}
+
+		if (menu_action == "Load") ImGui::OpenPopup("Load");
+		if (menu_action == "SaveAs") ImGui::OpenPopup("SaveAs");
+
+		if (ImGui::BeginPopup("Load"))
+		{
+			if (imPresets.empty()) {
+				ImGui::Text("No presets saved yet...");
+			}
+			else {
+				if (ImGui::Button("Reload list"))
+				{
+					
+				}
+
+				ImGui::Text("Load Preset:");
+				ImGui::Combo("", &imPresetIdx, imPresets);
+
+				if (ImGui::Button("Load"))
+				{
+					/*s.map.reset();
+					s.map = std::make_unique<Map>(i_id);
+					if (!s.map->Exists())
+					{
+						s.map.reset();
+						menu_action = "ErrorLoad";
+					}*/
+					//else ImGui::CloseCurrentPopup();
+				}
+
+				if (menu_action == "ErrorLoad") ImGui::OpenPopup("ErrorLoad");
+
+				if (ImGui::BeginPopupModal("ErrorLoad", NULL, ImGuiWindowFlags_NoResize))
+				{
+					ImGui::Text("Could not load map file of given ID.");
+					if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+
+					ImGui::EndPopup();
+				}
+			}
+			if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+
+			ImGui::EndPopup();
+		}
+		if (ImGui::BeginPopup("SaveAs"))
+		{
+			ImGui::Text("Save Preset As:");
+
+			static char buf[64] = "...";
+			ImGui::InputText("", buf, 64);
+
+			if (ImGui::Button("Save"))
+			{
+				imPresets.push_back(buf);
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 
 		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Settings");
@@ -1393,6 +1469,7 @@ void myInitOGLFun()
 		style.ItemSpacing = { 4.f, 2.f };
 		style.Colors[ImGuiCol_Border] = ImVec4(0.1f, 0.39f, 0.42f, 0.59f);
 		style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+		style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
 		style.Colors[ImGuiCol_TitleBg] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
 		style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);
 		style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.5f, 0.94f, 1.0f, 0.45f);

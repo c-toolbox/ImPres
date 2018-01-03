@@ -21,15 +21,15 @@
 #include <iterator>
 #include <algorithm> //used for transform string to lowercase
 #include <sgct.h>
-#include "FFmpegCapture.hpp"
+#include <FFmpegCapture.hpp>
 
 #ifdef RGBEASY_ENABLED
-#include "RGBEasyCapture.hpp"
+#include <RGBEasyCapture.hpp>
 #endif
 
 #ifdef ZXING_ENABLED
-#include "BGR24LuminanceSource.h"
-#include "QRCodeInterpreter.h"
+#include <BGR24LuminanceSource.h>
+#include <QRCodeInterpreter.h>
 #endif
 
 #ifdef OPENVR_SUPPORT

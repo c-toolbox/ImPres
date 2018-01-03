@@ -33,7 +33,7 @@ set(APP_NAME DomePres)
 
 set(CMAKE_DEBUG_POSTFIX "d" CACHE STRING "add a postfix, usually d on windows")
 set(CMAKE_RELEASE_POSTFIX "" CACHE STRING "add a postfix, usually empty on windows")
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/user_cmake/Modules")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/shared/user_cmake/Modules")
 
 project(${APP_NAME})
 
@@ -65,10 +65,10 @@ if(ZXING_ENABLE)
 		add_definitions(-DZXING_ENABLED)
 	endif()
 	set(IMPRES_ZXING_SRC 
-	BGR24LuminanceSource.h
-	BGR24LuminanceSource.cpp
-	QRCodeInterpreter.h
-	QRCodeInterpreter.cpp)
+	${CMAKE_SOURCE_DIR}/shared/BGR24LuminanceSource.h
+	${CMAKE_SOURCE_DIR}/shared/BGR24LuminanceSource.cpp
+	${CMAKE_SOURCE_DIR}/shared/QRCodeInterpreter.h
+	${CMAKE_SOURCE_DIR}/shared/QRCodeInterpreter.cpp)
 else()
 	set(ZXING_INCLUDE_DIRECTORY "")
 	set(ZXING_LIBRARY "")
@@ -110,8 +110,8 @@ if(RGBEASY_ENABLE)
 		add_definitions(-DRGBEASY_ENABLE)
 	endif()
 	set(IMPRES_RGBEASY_SRC 
-	RGBEasyCapture.cpp
-	RGBEasyCapture.hpp)
+	${CMAKE_SOURCE_DIR}/shared/RGBEasyCapture.cpp
+	${CMAKE_SOURCE_DIR}/shared/RGBEasyCapture.hpp)
 else()
 	set(RGBEASY_INCLUDE_DIRECTORY "")
 	set(RGBEASY_LIBARIES_DIRECTORY "")
@@ -152,8 +152,8 @@ endif()
 
 add_executable(${APP_NAME}
 	main.cpp
-	FFmpegCapture.cpp
-	FFmpegCapture.hpp
+	${CMAKE_SOURCE_DIR}/shared/FFmpegCapture.cpp
+	${CMAKE_SOURCE_DIR}/shared/FFmpegCapture.hpp
 	${IMGUI_INCLUDE_DIRECTORY}/imconfig.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_internal.h
@@ -252,7 +252,7 @@ set(FFMPEG_INCLUDES
 	${FFMPEG_LIBSWSCALE_INCLUDE_DIRS}
 	${FFMPEG_LIBAVRESAMPLE_INCLUDE_DIRS})
 
-include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY} ${OPENVR_INCLUDE_DIRS} ${SGCT_OPENVR_INCLUDE_DIRECTORY} ${RGBEASY_ROOT}/include ${RGBEASY_INCLUDE_DIRECTORY})
+include_directories(${SGCT_INCLUDE_DIRECTORY} ${FFMPEG_ROOT}/include ${FFMPEG_INCLUDES} ${ZXING_INCLUDE_DIRECTORY} ${IMGUI_INCLUDE_DIRECTORY} ${OPENVR_INCLUDE_DIRS} ${SGCT_OPENVR_INCLUDE_DIRECTORY} ${RGBEASY_ROOT}/include ${RGBEASY_INCLUDE_DIRECTORY} ${CMAKE_SOURCE_DIR}/shared)
 
 set(FFMPEG_LIBS
 	${FFMPEG_LIBAVCODEC_LIBRARIES}

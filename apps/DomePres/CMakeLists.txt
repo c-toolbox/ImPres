@@ -76,33 +76,46 @@ else()
 endif()
 
 # RGBEasy Specific
-if(NOT RGBEASY_INCLUDE_DIRECTORY)
-    if( WIN32 )
-        find_path(RGBEASY_INCLUDE_DIRECTORY
-            NAMES RGBAPI.h
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_includes/RGBEasy NO_DEFAULT_PATH
-            REQUIRED)
-    else()
-        find_path(RGBEASY_INCLUDE_DIRECTORY
-            NAMES RGBAPI.h
-            PATH_SUFFIXES RGBEasy
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_includes/RGBEasy
-            REQUIRED)
-    endif()
-endif()
-if(NOT RGBEASY_LIBARIES_DIRECTORY)
-    if( WIN32 )
-        find_path(RGBEASY_LIBARIES_DIRECTORY
-            NAMES RGBEasyLibs.txt
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_libs/RGBEasy NO_DEFAULT_PATH
-            REQUIRED)
-    else()
-        find_path(RGBEASY_LIBARIES_DIRECTORY
-            NAMES RGBEasyLibs.txt
-            PATH_SUFFIXES RGBEasy
-            PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_libs/RGBEasy
-            REQUIRED)
-    endif()
+option(RGBEASY_ENABLE "Use RGBEASY to capture high-res fulldome fisheye" OFF)
+if(RGBEASY_ENABLE)
+	if(NOT RGBEASY_INCLUDE_DIRECTORY)
+		if( WIN32 )
+			find_path(RGBEASY_INCLUDE_DIRECTORY
+				NAMES RGBAPI.h
+				PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_includes/RGBEasy NO_DEFAULT_PATH
+				REQUIRED)
+		else()
+			find_path(RGBEASY_INCLUDE_DIRECTORY
+				NAMES RGBAPI.h
+				PATH_SUFFIXES RGBEasy
+				PATHS $ENV{SGCT_ROOT_DIR}/additional_includes/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_includes/RGBEasy
+				REQUIRED)
+		endif()
+	endif()
+	if(NOT RGBEASY_LIBARIES_DIRECTORY)
+		if( WIN32 )
+			find_path(RGBEASY_LIBARIES_DIRECTORY
+				NAMES RGBEasyLibs.txt
+				PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_libs/RGBEasy NO_DEFAULT_PATH
+				REQUIRED)
+		else()
+			find_path(RGBEASY_LIBARIES_DIRECTORY
+				NAMES RGBEasyLibs.txt
+				PATH_SUFFIXES RGBEasy
+				PATHS $ENV{SGCT_ROOT_DIR}/additional_libs/RGBEasy ${CMAKE_SOURCE_DIR}/ext/sgct/additional_libs/RGBEasy
+				REQUIRED)
+		endif()
+	endif()
+	if(RGBEASY_INCLUDE_DIRECTORY AND RGBEASY_LIBARIES_DIRECTORY)
+		add_definitions(-DRGBEASY_ENABLE)
+	endif()
+	set(IMPRES_RGBEASY_SRC 
+	RGBEasyCapture.cpp
+	RGBEasyCapture.hpp)
+else()
+	set(RGBEASY_INCLUDE_DIRECTORY "")
+	set(RGBEASY_LIBARIES_DIRECTORY "")
+	set(IMPRES_RGBEASY_SRC "")
 endif()
 
 ##OpenVR section start####################
@@ -141,8 +154,6 @@ add_executable(${APP_NAME}
 	main.cpp
 	FFmpegCapture.cpp
 	FFmpegCapture.hpp
-	RGBEasyCapture.cpp
-	RGBEasyCapture.hpp
 	${IMGUI_INCLUDE_DIRECTORY}/imconfig.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_internal.h
@@ -151,6 +162,7 @@ add_executable(${APP_NAME}
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_draw.cpp
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.h
     ${IMGUI_INCLUDE_DIRECTORY}/imgui_impl_glfw_gl3.cpp
+	${IMPRES_RGBEASY_SRC}
 	${IMPRES_ZXING_SRC}
 	${SGCT_OPENVR_FILES}
 )
@@ -208,21 +220,25 @@ set(SGCT_LIBS
 	optimized ${SGCT_RELEASE_LIBRARY}
 )
 
-set(RGBEASY_LIBS ${RGBEASY_LIBARIES_DIRECTORY}/RGBEASY.LIB)
-if( WIN32 )
-	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-		# 64 bits
-		set(RGBEASY_LIBS
-			debug ${RGBEASY_LIBARIES_DIRECTORY}/x64/Debug/RGBEASY.LIB
-			optimized ${RGBEASY_LIBARIES_DIRECTORY}/x64/Release/RGBEASY.LIB
-		)
-	elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
-		# 32 bits
-		set(RGBEASY_LIBS
-			debug ${RGBEASY_LIBARIES_DIRECTORY}/Win32/Debug/RGBEASY.LIB
-			optimized ${RGBEASY_LIBARIES_DIRECTORY}/Win32/Release/RGBEASY.LIB
-		)
+if(RGBEASY_ENABLE)
+	set(RGBEASY_LIBS ${RGBEASY_LIBARIES_DIRECTORY}/RGBEASY.LIB)
+	if( WIN32 )
+		if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+			# 64 bits
+			set(RGBEASY_LIBS
+				debug ${RGBEASY_LIBARIES_DIRECTORY}/x64/Debug/RGBEASY.LIB
+				optimized ${RGBEASY_LIBARIES_DIRECTORY}/x64/Release/RGBEASY.LIB
+			)
+		elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+			# 32 bits
+			set(RGBEASY_LIBS
+				debug ${RGBEASY_LIBARIES_DIRECTORY}/Win32/Debug/RGBEASY.LIB
+				optimized ${RGBEASY_LIBARIES_DIRECTORY}/Win32/Release/RGBEASY.LIB
+			)
+		endif()
 	endif()
+else()
+	set(RGBEASY_LIBS "")
 endif()
 
 find_package(OpenGL REQUIRED)

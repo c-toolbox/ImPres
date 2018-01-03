@@ -22,7 +22,10 @@
 #include <algorithm> //used for transform string to lowercase
 #include <sgct.h>
 #include "FFmpegCapture.hpp"
+
+#ifdef RGBEASY_ENABLED
 #include "RGBEasyCapture.hpp"
+#endif
 
 #ifdef ZXING_ENABLED
 #include "BGR24LuminanceSource.h"
@@ -96,7 +99,9 @@ std::vector<std::string> split(const std::string &s, char delim) {
 
 sgct::Engine * gEngine;
 FFmpegCapture* gPlaneCapture = NULL;
+#ifdef RGBEASY_ENABLED
 RGBEasyCapture* gFisheyeCapture = NULL;
+#endif
 
 //sgct callbacks
 void myPreSyncFun();
@@ -257,15 +262,18 @@ void uploadCaptureData(uint8_t ** data, int width, int height);
 void parseArguments(int& argc, char**& argv);
 GLuint allocateCaptureTexture();
 void planeCaptureLoop();
-void fisheyeCaptureLoop();
-void fisheyeCapturePollAndDraw();
-void fisheyeRenderToTextureSetup();
 void calculateStats();
 void startPlaneCapture();
 void stopPlaneCapture();
+void createPlanes();
+
+#ifdef RGBEASY_ENABLED
+void fisheyeCaptureLoop();
+void fisheyeCapturePollAndDraw();
+void fisheyeRenderToTextureSetup();
 void startFisheyeCapture();
 void stopFisheyeCapture();
-void createPlanes();
+#endif
 
 struct RT
 {
@@ -353,7 +361,9 @@ int main( int argc, char* argv[] )
     
     gEngine = new sgct::Engine( argc, argv );
     gPlaneCapture = new FFmpegCapture();
+#ifdef RGBEASY_ENABLED
 	gFisheyeCapture = new RGBEasyCapture();
+#endif
 
     // arguments:
     // -host <host which should capture>
@@ -414,8 +424,10 @@ int main( int argc, char* argv[] )
 	if(planeCaptureRunning.getVal())
 		stopPlaneCapture();
 
+#ifdef RGBEASY_ENABLED
 	if (fisheyeCaptureRunning.getVal())
 		stopFisheyeCapture();
+#endif
 
     running.setVal(false);
     if (loadThread)
@@ -430,7 +442,9 @@ int main( int argc, char* argv[] )
 
     // Clean up
     delete gPlaneCapture;
+#ifdef RGBEASY_ENABLED
 	delete gFisheyeCapture;
+#endif
     delete gEngine;
 
     // Exit program
@@ -496,12 +510,14 @@ void myPostSyncPreDrawFun()
 	if (planeReCreate.getVal())
 		createPlanes();
 
+#ifdef RGBEASY_ENABLED
 	// Run a poll from the capturing
 	// If we are not doing that in the background
 	// Storing the result in captureRT.texture
 	if (fisheyeCaptureRunning.getVal()) {
 		fisheyeCapturePollAndDraw();
 	}
+#endif
 
 #ifdef OPENVR_SUPPORT
 	if (FirstOpenVRWindow) {
@@ -881,6 +897,7 @@ void stopPlaneCapture()
 	}
 }
 
+#ifdef RGBEASY_ENABLED
 void startFisheyeCapture()
 {
 	//start capture thread if host or load thread if master and not host
@@ -1016,6 +1033,7 @@ void fisheyeRenderToTextureSetup() {
 	//unbind
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
+#endif
 
 void createPlanes() {
 	//Capture planes
@@ -1218,6 +1236,7 @@ void myInitOGLFun()
 		startPlaneCapture();
 	}
 
+#ifdef RGBEASY_ENABLED
 	// due a high-frame rate fisheye capturing (if requested)
 	if (fisheyeCaptureRequested) {
 		sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
@@ -1246,6 +1265,7 @@ void myInitOGLFun()
 		currentDomeTexIdx = domeTexIndex.getVal();
 		numSyncedTex = 1;
 	}
+#endif
 
 	//start load thread
     if (gEngine->isMaster())
@@ -1948,7 +1968,9 @@ void parseArguments(int& argc, char**& argv)
         if (strcmp(argv[i], "-host") == 0 && argc > (i + 1))
         {
             gPlaneCapture->setVideoHost(std::string(argv[i + 1]));
+#ifdef RGBEASY_ENABLED
 			gFisheyeCapture->setCaptureHost(std::string(argv[i + 1]));
+#endif
         }
         else if (strcmp(argv[i], "-video") == 0 && argc > (i + 1))
         {
@@ -1964,6 +1986,7 @@ void parseArguments(int& argc, char**& argv)
 		{
 			flipFrame = true;
 		}
+#ifdef RGBEASY_ENABLED
 		else if (strcmp(argv[i], "-fisheyecapture") == 0)
 		{
 			fisheyeCaptureRequested = true;
@@ -1980,6 +2003,7 @@ void parseArguments(int& argc, char**& argv)
 			gFisheyeCapture->setCaptureGanging(true);
 			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Fisheye/capture ganging enabled\n");
 		}
+#endif
 		else if (strcmp(argv[i], "-defaultfisheye") == 0)
 		{
 			std::string defaultFisheye = std::string(argv[i + 1]);

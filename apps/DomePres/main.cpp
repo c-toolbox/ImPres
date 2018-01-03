@@ -1270,7 +1270,7 @@ void myInitOGLFun()
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("LeftCapture");
-	ContentPlane leftCapture = ContentPlane("LeftCapture", -2.865, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
+	ContentPlane leftCapture = ContentPlane("LeftCapture", 2.865, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributesGlobal.addVal(leftCapture.getGlobal());
 	planeAttributesLocal.addVal(leftCapture.getLocal());

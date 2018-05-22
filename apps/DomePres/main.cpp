@@ -101,6 +101,7 @@ sgct::Engine * gEngine;
 FFmpegCapture* gPlaneCapture = NULL;
 #ifdef RGBEASY_ENABLED
 RGBEasyCapture* gFisheyeCapture = NULL;
+RGBEasyCapture* gPlaneDPCapture = NULL;
 #endif
 
 //sgct callbacks
@@ -267,14 +268,6 @@ void startPlaneCapture();
 void stopPlaneCapture();
 void createPlanes();
 
-#ifdef RGBEASY_ENABLED
-void fisheyeCaptureLoop();
-void fisheyeCapturePollAndDraw();
-void fisheyeRenderToTextureSetup();
-void startFisheyeCapture();
-void stopFisheyeCapture();
-#endif
-
 struct RT
 {
 	unsigned int texture;
@@ -283,7 +276,21 @@ struct RT
 	unsigned long width;
 	unsigned long height;
 };
-RT captureRT;
+RT planeDPCaptureRT;
+RT fisheyeCaptureRT;
+
+#ifdef RGBEASY_ENABLED
+void planeDPCaptureLoop();
+void startPlaneDPCapture();
+void stopPlaneDPCapture();
+
+void fisheyeCaptureLoop();
+void startFisheyeCapture();
+void stopFisheyeCapture();
+
+void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT);
+void RGBEasyRenderToTextureSetup(RGBEasyCapture* capture, RT& captureRT);
+#endif
 
 GLint Matrix_Loc = -1;
 GLint Matrix_Loc_RT = -1;
@@ -302,17 +309,22 @@ GLint ChromaKeyColor_Loc_CK = -1;
 GLint ChromaKeyFactor_Loc_CK = -1;
 
 GLuint planeCaptureTexId = GL_FALSE;
+int planceCaptureWidth = 0;
+int planeCaptureHeight = 0;
 
 std::thread * planeCaptureThread;
+std::thread * planeDPCaptureThread;
 std::thread * fisheyeCaptureThread;
 bool flipFrame = false;
 bool fulldomeMode = false;
+bool planeDPCaptureRequested = false;
 bool fisheyeCaptureRequested = false;
 
 glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
 
 sgct::SharedBool planeCaptureRunning(true);
+sgct::SharedBool planeDPCaptureRunning(true);
 sgct::SharedBool fisheyeCaptureRunning(true);
 sgct::SharedInt captureLockStatus(0);
 sgct::SharedBool renderDome(fulldomeMode);
@@ -365,6 +377,7 @@ int main( int argc, char* argv[] )
     gPlaneCapture = new FFmpegCapture();
 #ifdef RGBEASY_ENABLED
 	gFisheyeCapture = new RGBEasyCapture();
+	gPlaneDPCapture = new RGBEasyCapture();
 #endif
 
     // arguments:
@@ -427,6 +440,9 @@ int main( int argc, char* argv[] )
 		stopPlaneCapture();
 
 #ifdef RGBEASY_ENABLED
+	if (planeDPCaptureRunning.getVal())
+		stopPlaneDPCapture();
+
 	if (fisheyeCaptureRunning.getVal())
 		stopFisheyeCapture();
 #endif
@@ -445,6 +461,7 @@ int main( int argc, char* argv[] )
     // Clean up
     delete gPlaneCapture;
 #ifdef RGBEASY_ENABLED
+	delete gPlaneDPCapture;
 	delete gFisheyeCapture;
 #endif
     delete gEngine;
@@ -515,9 +532,9 @@ void myPostSyncPreDrawFun()
 #ifdef RGBEASY_ENABLED
 	// Run a poll from the capturing
 	// If we are not doing that in the background
-	// Storing the result in captureRT.texture
+	// Storing the result in fisheyeCaptureRT.texture
 	if (fisheyeCaptureRunning.getVal()) {
-		fisheyeCapturePollAndDraw();
+		RGBEasyCapturePollAndDraw(gFisheyeCapture, fisheyeCaptureRT);
 	}
 #endif
 
@@ -687,7 +704,7 @@ void myDraw3DFun()
 		{
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
-			glm::vec2 texSize = glm::vec2(static_cast<float>(gPlaneCapture->getWidth()), static_cast<float>(gPlaneCapture->getHeight()));
+			glm::vec2 texSize = glm::vec2(static_cast<float>(planceCaptureWidth), static_cast<float>(planeCaptureHeight));
 
 			glUniform1f(Opacity_L, 1.f);
 
@@ -790,14 +807,15 @@ void myDraw2DFun()
         sgct_text::Font * font = sgct_text::FontManager::instance()->getFont("SGCTFont", font_size);
         float padding = 10.0f;
 
-        sgct_text::print(font, sgct_text::TOP_LEFT,
+        /*sgct_text::print(font, sgct_text::TOP_LEFT,
             padding, static_cast<float>(gEngine->getCurrentWindowPtr()->getYFramebufferResolution() - font_size) - padding, //x and y pos
             glm::vec4(1.0, 1.0, 1.0, 1.0), //color
             "Format: %s\nResolution: %d x %d\nRate: %.2lf Hz",
             gPlaneCapture->getFormat(),
-            gPlaneCapture->getWidth(),
-            gPlaneCapture->getHeight(),
+            planceCaptureWidth,
+            planeCaptureHeight,
             captureRate.getVal());
+			*/
     }
 
 	bool drawGUI = true;
@@ -974,6 +992,34 @@ void stopPlaneCapture()
 }
 
 #ifdef RGBEASY_ENABLED
+void startPlaneDPCapture()
+{
+	//start capture thread if host or load thread if master and not host
+	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
+	if (thisNode->getAddress() == gPlaneDPCapture->getCaptureHost()) {
+		planeDPCaptureRunning.setVal(true);
+		planeDPCaptureThread = new (std::nothrow) std::thread(planeDPCaptureLoop);
+	}
+}
+
+void stopPlaneDPCapture()
+{
+	//kill capture thread
+	planeDPCaptureRunning.setVal(false);
+	if (planeDPCaptureThread)
+	{
+		planeDPCaptureThread->join();
+		delete planeDPCaptureThread;
+	}
+}
+
+void planeDPCaptureLoop() {
+	gPlaneDPCapture->runCapture();
+	while (planeDPCaptureRunning.getVal()) {
+		// Frame capture running...
+	}
+}
+
 void startFisheyeCapture()
 {
 	//start capture thread if host or load thread if master and not host
@@ -995,10 +1041,17 @@ void stopFisheyeCapture()
 	}
 }
 
-void fisheyeCapturePollAndDraw() {
-	if (gFisheyeCapture->prepareForRendering()) {
+void fisheyeCaptureLoop() {
+	gFisheyeCapture->runCapture();
+	while (fisheyeCaptureRunning.getVal()) {
+		// Frame capture running...
+	}
+}
+
+void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT) {
+	if (capture->prepareForRendering()) {
 		//Rendering to square texture when assumig ganing (i.e. from 2x1 to 1x2) as 1x2 does not seem to function properly
-		if (gFisheyeCapture->getGanging()) {
+		if (capture->getGanging()) {
 			sgct::ShaderManager::instance()->bindShaderProgram("sbs2tb");
 
 			//transform
@@ -1030,7 +1083,7 @@ void fisheyeCapturePollAndDraw() {
 		sgct::ShaderManager::instance()->unBindShaderProgram();
 
 		//give capture buffer back to RGBEasy
-		gFisheyeCapture->renderingCompleted();
+		capture->renderingCompleted();
 
 		//restore
 		if (fbo)
@@ -1041,23 +1094,16 @@ void fisheyeCapturePollAndDraw() {
 	}
 }
 
-void fisheyeCaptureLoop() {
-	gFisheyeCapture->runCapture();
-	while (fisheyeCaptureRunning.getVal()) {
-		// Frame capture running...
-	}
-}
-
-void fisheyeRenderToTextureSetup() {
+void RGBEasyRenderToTextureSetup(RGBEasyCapture* capture, RT& captureRT) {
 	// check if we are ganing inputs
 	// thus we assume 2x1 (sbs) which we want to change to 1x2 (tb)
-	if (gFisheyeCapture->getGanging()) {
-		captureRT.width = gFisheyeCapture->getWidth() / 2;
-		captureRT.height = gFisheyeCapture->getHeight() * 2;
+	if (capture->getGanging()) {
+		captureRT.width = capture->getWidth() / 2;
+		captureRT.height = capture->getHeight() * 2;
 	}
 	else {
-		captureRT.width = gFisheyeCapture->getWidth();
-		captureRT.height = gFisheyeCapture->getHeight();
+		captureRT.width = capture->getWidth();
+		captureRT.height = capture->getHeight();
 	}
 
 	captureRT.fbo = GL_FALSE;
@@ -1119,7 +1165,7 @@ void createPlanes() {
 	}
 	captureContentPlanes.clear();
 
-	float captureRatio = (static_cast<float>(gPlaneCapture->getWidth()) / static_cast<float>(gPlaneCapture->getHeight()));
+	float captureRatio = (static_cast<float>(planceCaptureWidth) / static_cast<float>(planeCaptureHeight));
 
 	for (int i = 0; i < capturePlaneSize; i++) {
 		float planeWidth = planeAttributesGlobal.getVal()[i].height * captureRatio;
@@ -1300,30 +1346,63 @@ void myInitOGLFun()
 	}
 #endif
 
-    bool captureReady = gPlaneCapture->init();
-    //allocate texture
-	if (captureReady) {
-		planeCaptureTexId = allocateCaptureTexture();
-	}
-	planeImageFileNames.push_back("Single Capture");
+	// do directshow if we don't use the better RGBEasy solution
+	if (!planeDPCaptureRequested) {
+		bool captureReady = gPlaneCapture->init();
+		planceCaptureWidth = gPlaneCapture->getWidth();
+		planeCaptureHeight = gPlaneCapture->getHeight();
 
-	if (captureReady) {
-		//start capture
-		startPlaneCapture();
+		//allocate texture
+		if (captureReady) {
+			planeCaptureTexId = allocateCaptureTexture();
+		}
+		planeImageFileNames.push_back("Single Capture");
+
+		if (captureReady) {
+			//start capture
+			startPlaneCapture();
+		}
+
+		std::function<void(uint8_t ** data, int width, int height)> callback = uploadCaptureData;
+		gPlaneCapture->setVideoDecoderCallback(callback);
 	}
 
 #ifdef RGBEASY_ENABLED
-	// due a high-frame rate fisheye capturing (if requested)
+	// do a high-frame rate fisheye capturing (if requested)
+	if (planeDPCaptureRequested) {
+		sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
+		planeDPCaptureRT.texture = GL_FALSE;
+		if (thisNode->getAddress() == gPlaneDPCapture->getCaptureHost()) {
+			if (gPlaneDPCapture->initialize()) {
+				planceCaptureWidth = gPlaneDPCapture->getWidth();
+				planeCaptureHeight = gPlaneDPCapture->getHeight();
+
+				// Perform Capture OpenGL operations on MAIN thread
+				// initalize capture OpenGL (running on this thread)
+				gPlaneDPCapture->initializeGL();
+				RGBEasyRenderToTextureSetup(gPlaneDPCapture, planeDPCaptureRT);
+
+				// Perform frame capture on BACKGROUND thread
+				// start capture thread (which will intialize RGBEasy things)
+				startPlaneDPCapture();
+			}
+		}
+
+		planeImageFileNames.push_back("Single DP Capture");
+		planeCaptureTexId = planeDPCaptureRT.texture;
+	}
+
+	// do a high-frame rate fisheye capturing (if requested)
 	if (fisheyeCaptureRequested) {
 		sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
-		captureRT.texture = GL_FALSE;
+		fisheyeCaptureRT.texture = GL_FALSE;
 		if (thisNode->getAddress() == gFisheyeCapture->getCaptureHost()) {
 			if (gFisheyeCapture->initialize()) {
 
 				// Perform Capture OpenGL operations on MAIN thread
 				// initalize capture OpenGL (running on this thread)
 				gFisheyeCapture->initializeGL();
-				fisheyeRenderToTextureSetup();
+				RGBEasyRenderToTextureSetup(gFisheyeCapture, fisheyeCaptureRT);
 
 				// Perform frame capture on BACKGROUND thread
 				// start capture thread (which will intialize RGBEasy things)
@@ -1332,7 +1411,7 @@ void myInitOGLFun()
 		}
 
 		domeImageFileNames.push_back("Fisheye Capture");
-		texIds.addVal(captureRT.texture);
+		texIds.addVal(fisheyeCaptureRT.texture);
 		texAspectRatio.addVal(1.f);
 		imagePathsVec.push_back(std::pair<std::string, int>("", 0));
 		imagePathsMap.insert(std::pair<std::string, int>(domeImageFileNames[0], 0));
@@ -1346,9 +1425,6 @@ void myInitOGLFun()
 	//start load thread
     if (gEngine->isMaster())
         loadThread = new (std::nothrow) std::thread(threadWorker);
-
-    std::function<void(uint8_t ** data, int width, int height)> callback = uploadCaptureData;
-    gPlaneCapture->setVideoDecoderCallback(callback);
 
 	//define capture planes
 	imPlanes.push_back("FrontCapture");
@@ -1366,21 +1442,21 @@ void myInitOGLFun()
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("LeftCapture");
-	ContentPlane leftCapture = ContentPlane("LeftCapture", 2.865, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
+	ContentPlane leftCapture = ContentPlane("LeftCapture", 2.865f, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributesGlobal.addVal(leftCapture.getGlobal());
 	planeAttributesLocal.addVal(leftCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("RightCapture");
-	ContentPlane rightCapture = ContentPlane("RightCapture", 2.865, 75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
+	ContentPlane rightCapture = ContentPlane("RightCapture", 2.865f, 75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributesGlobal.addVal(rightCapture.getGlobal());
 	planeAttributesLocal.addVal(rightCapture.getLocal());
 	captureContentPlanes.push_back(nullptr);
 
 	imPlanes.push_back("TopCapture");
-	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135, imPlaneRoll, imPlaneDistance, false);
+	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135f, imPlaneRoll, imPlaneDistance, false);
 	planeTexOwnedIds.push_back(allocateCaptureTexture());
 	planeAttributesGlobal.addVal(topCapture.getGlobal());
 	planeAttributesLocal.addVal(topCapture.getLocal());
@@ -1397,7 +1473,7 @@ void myInitOGLFun()
 	RTsquare = new sgct_utils::SGCTPlane(2.0f, 2.0f);
 
     //create dome
-    dome = new sgct_utils::SGCTDome(7.4f, 180.0f, 256, 128);
+    dome = new sgct_utils::SGCTDome(7.4f, 165.f, 256, 128);
 
     sgct::ShaderManager::instance()->addShaderProgram( "xform",
             "xform.vert",
@@ -1913,7 +1989,7 @@ void uploadTexture()
 
                 GLenum internalformat;
                 GLenum type;
-                unsigned int bpc = transImages[i]->getBytesPerChannel();
+                size_t bpc = transImages[i]->getBytesPerChannel();
 
                 switch (transImages[i]->getChannels())
                 {
@@ -1941,8 +2017,8 @@ void uploadTexture()
 
                 GLenum format = (bpc == 1 ? GL_UNSIGNED_BYTE : GL_UNSIGNED_SHORT);
 
-                glTexStorage2D(GL_TEXTURE_2D, 1, internalformat, transImages[i]->getWidth(), transImages[i]->getHeight());
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, transImages[i]->getWidth(), transImages[i]->getHeight(), type, format, transImages[i]->getData());
+                glTexStorage2D(GL_TEXTURE_2D, 1, internalformat, static_cast<GLsizei>(transImages[i]->getWidth()), static_cast<GLsizei>(transImages[i]->getHeight()));
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(transImages[i]->getWidth()), static_cast<GLsizei>(transImages[i]->getHeight()), type, format, transImages[i]->getData());
 
                 //---------------------
                 // Disable mipmaps
@@ -2044,9 +2120,11 @@ void parseArguments(int& argc, char**& argv)
     {
         if (strcmp(argv[i], "-host") == 0 && argc > (i + 1))
         {
-            gPlaneCapture->setVideoHost(std::string(argv[i + 1]));
+			std::string host = std::string(argv[i + 1]);
+            gPlaneCapture->setVideoHost(host);
 #ifdef RGBEASY_ENABLED
-			gFisheyeCapture->setCaptureHost(std::string(argv[i + 1]));
+			gPlaneDPCapture->setCaptureHost(host);
+			gFisheyeCapture->setCaptureHost(host);
 #endif
         }
         else if (strcmp(argv[i], "-video") == 0 && argc > (i + 1))
@@ -2055,25 +2133,37 @@ void parseArguments(int& argc, char**& argv)
         }
 		else if (strcmp(argv[i], "-option") == 0 && argc > (i + 2))
 		{
-			gPlaneCapture->addOption(
-				std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Added capture option %s, parameter %s\n", std::string(argv[i + 1]), std::string(argv[i + 2]));
+			std::string option = std::string(argv[i + 1]);
+			std::string value = std::string(argv[i + 2]);
+			gPlaneCapture->addOption(std::make_pair(option, value));
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Added capture option %s, parameter %s\n", option.c_str(), value.c_str());
 		}
 		else if (strcmp(argv[i], "-flip") == 0)
 		{
 			flipFrame = true;
 		}
 #ifdef RGBEASY_ENABLED
+		else if (strcmp(argv[i], "-planecapture") == 0)
+		{
+			planeDPCaptureRequested = true;
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy plane capture requested\n");
+		}
+		else if (strcmp(argv[i], "-planeinput") == 0 && argc >(i + 1))
+		{
+			int captureInput = static_cast<int>(atoi(argv[i + 1]));
+			gPlaneDPCapture->setCaptureInput(captureInput);
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy plane capture on input %i\n", captureInput);
+		}
 		else if (strcmp(argv[i], "-fisheyecapture") == 0)
 		{
 			fisheyeCaptureRequested = true;
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Fisheye capture requested\n");
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy fisheye capture requested\n");
 		}
 		else if (strcmp(argv[i], "-fisheyeinput") == 0 && argc >(i + 1))
 		{
-			gFisheyeCapture->setCaptureInput(static_cast<int>(atoi(argv[i + 1])));
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Fisheye capture on input %s\n", std::string(argv[i + 1]));
-
+			int captureInput = static_cast<int>(atoi(argv[i + 1]));
+			gFisheyeCapture->setCaptureInput(captureInput);
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy fisheye capture on input %i\n", captureInput);
 		}
 		else if (strcmp(argv[i], "-fisheyeganging") == 0)
 		{
@@ -2112,8 +2202,8 @@ void parseArguments(int& argc, char**& argv)
 
 GLuint allocateCaptureTexture()
 {
-    int w = gPlaneCapture->getWidth();
-    int h = gPlaneCapture->getHeight();
+    int w = planceCaptureWidth;
+    int h = planeCaptureHeight;
 
     if (w * h <= 0)
     {
@@ -2130,9 +2220,9 @@ GLuint allocateCaptureTexture()
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, w, h);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 24);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
@@ -2278,7 +2368,7 @@ void planeCaptureLoop()
 {
     glfwMakeContextCurrent(hiddenPlaneCaptureWindow);
 
-    int dataSize = gPlaneCapture->getWidth() * gPlaneCapture->getHeight() * 3;
+    int dataSize = planceCaptureWidth * planeCaptureHeight * 3;
     GLuint PBO;
     glGenBuffers(1, &PBO);
 

@@ -122,6 +122,7 @@ GLint Matrix_Loc = -1;
 GLint Matrix_Loc_RT = -1;
 GLint ScaleUV_Loc = -1;
 GLint OffsetUV_Loc = -1;
+GLint flipFrame_Loc = -1;
 
 GLuint ffmpegCaptureTexId = GL_FALSE;
 
@@ -129,6 +130,7 @@ std::thread * ffmpegCaptureThread;
 std::thread * rgbEasyCaptureThread;
 
 bool flipFrame = false;
+bool ffmpegCaptureRequested = false;
 bool rgbEasyCaptureRequested = false;
 
 sgct::SharedBool ffmpegCaptureRunning(true);
@@ -235,9 +237,16 @@ void myDraw3DFun()
 
 	sgct::ShaderManager::instance()->bindShaderProgram("xform");
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, ffmpegCaptureTexId);
+	if(ffmpegCaptureRequested) {
+		glBindTexture(GL_TEXTURE_2D, ffmpegCaptureTexId);
+	}
+	else if (rgbEasyCaptureRequested) {
+		glBindTexture(GL_TEXTURE_2D, captureRT.texture);
+	}
 	glUniform2f(ScaleUV_Loc, 1.f, 1.f);
 	glUniform2f(OffsetUV_Loc, 0.f, 0.f);
+	glUniform2f(OffsetUV_Loc, 0.f, 0.f);
+	glUniform1i(flipFrame_Loc, flipFrame);
 	glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &MVP[0][0]);
 
     //draw square
@@ -333,6 +342,7 @@ void rgbEasyCapturePollAndDraw() {
 
 			//transform
 			glm::mat4 planeTransform = glm::mat4(1.0f);
+			glUniform1i(flipFrame_Loc, false);
 			glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &planeTransform[0][0]);
 		}
 
@@ -436,15 +446,17 @@ void rgbEasyRenderToTextureSetup() {
 
 void myInitOGLFun()
 {
-    bool captureReady = gFFmpegCapture->init();
-    //allocate texture
-	if (captureReady) {
-		ffmpegCaptureTexId = allocateCaptureTexture();
-	}
+	if (ffmpegCaptureRequested) {
+		bool captureReady = gFFmpegCapture->init();
+		//allocate texture
+		if (captureReady) {
+			ffmpegCaptureTexId = allocateCaptureTexture();
+		}
 
-	if (captureReady) {
-		//start capture
-		startFFmpegCapture();
+		if (captureReady) {
+			//start capture
+			startFFmpegCapture();
+		}
 	}
 
 #ifdef RGBEASY_ENABLED
@@ -483,6 +495,7 @@ void myInitOGLFun()
     Matrix_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation( "MVP" );
     ScaleUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation("scaleUV");
     OffsetUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation("offsetUV");
+	flipFrame_Loc = sgct::ShaderManager::instance()->getShaderProgram("xform").getUniformLocation("flipFrame");
     GLint Tex_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation( "Tex" );
     glUniform1i( Tex_Loc, 0 );
 
@@ -567,15 +580,21 @@ void parseArguments(int& argc, char**& argv)
 			gRGBEasyCapture->setCaptureHost(std::string(argv[i + 1]));
 #endif
         }
+		else if (strcmp(argv[i], "-ffmpegcapture") == 0)
+		{
+			ffmpegCaptureRequested = true;
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "FFmpeg capture requested\n");
+		}
         else if (strcmp(argv[i], "-video") == 0 && argc > (i + 1))
         {
             gFFmpegCapture->setVideoDevice(std::string(argv[i + 1]));
         }
 		else if (strcmp(argv[i], "-option") == 0 && argc > (i + 2))
 		{
-			gFFmpegCapture->addOption(
-				std::make_pair(std::string(argv[i + 1]), std::string(argv[i + 2])));
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Added capture option %s, parameter %s\n", std::string(argv[i + 1]), std::string(argv[i + 2]));
+			std::string option = std::string(argv[i + 1]);
+			std::string value = std::string(argv[i + 2]);
+			gFFmpegCapture->addOption(std::make_pair(option, value));
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Added capture option %s, parameter %s\n", option.c_str(), value.c_str());
 		}
 		else if (strcmp(argv[i], "-flip") == 0)
 		{
@@ -589,8 +608,9 @@ void parseArguments(int& argc, char**& argv)
 		}
 		else if (strcmp(argv[i], "-rgbeasyinput") == 0 && argc >(i + 1))
 		{
-			gRGBEasyCapture->setCaptureInput(static_cast<int>(atoi(argv[i + 1])));
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy capture on input %s\n", std::string(argv[i + 1]));
+			int captureInput = static_cast<int>(atoi(argv[i + 1]));
+			gRGBEasyCapture->setCaptureInput(captureInput);
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy capture on input %i\n", captureInput);
 
 		}
 		else if (strcmp(argv[i], "-rgbeasyganging") == 0)
@@ -646,25 +666,14 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 		{
 			int dataOffset = 0;
 			int stride = width * 3; //Assuming BGR24
-			if (gFFmpegCapture->isFormatYUYV422()) {
+			/*if (gFFmpegCapture->isFormatYUYV422()) {
 				stride = width * 2;
-			}
+			}*/
 
-			if (flipFrame)
+			for (int row = height - 1; row > -1; row--)
 			{
-				for (int row = 0; row < height; row++)
-				{
-					memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
-					dataOffset += stride;
-				}
-			}
-			else
-			{
-				for (int row = height - 1; row > -1; row--)
-				{
-					memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
-					dataOffset += stride;
-				}
+				memcpy(GPU_ptr + dataOffset, data[0] + row * stride, stride);
+				dataOffset += stride;
 			}
 
 			glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
@@ -672,14 +681,14 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, ffmpegCaptureTexId);
 
-			if (gFFmpegCapture->isFormatYUYV422()) {
+			/*if (gFFmpegCapture->isFormatYUYV422()) {
 				//AV_PIX_FMT_YUYV422
 				//int y1, u, y2, v;
 				glTexImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, 0);
 			}
-			else { //Assuming BGR24
+			else { //Assuming BGR24*/
 				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
-			}
+			//}
 		}
 
 		//calculateStats();

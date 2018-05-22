@@ -177,12 +177,12 @@ void FFmpegCapture::setVideoDecoderCallback(std::function<void(uint8_t ** data, 
 void FFmpegCapture::addOption(std::pair<std::string, std::string> option)
 {
 	mUserOptions.push_back(option);
-	if (option.first.c_str() == "pixel_format") {
-		if (option.second.c_str() == "yuyv422") {
+	if (option.first.compare("pixel_format") == 0) {
+		if (option.second.compare("yuyv422") == 0) {
 			mDstPixFmt = AV_PIX_FMT_YUYV422;
 			mFormatYUVY422 = true;
 		}
-		else if (option.second.c_str() == "bgr24") {
+		else if (option.second.compare("bgr24") == 0) {
 			mDstPixFmt = AV_PIX_FMT_BGR24;
 			mFormatBGR24 = true;
 		}

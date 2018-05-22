@@ -297,6 +297,7 @@ GLint Matrix_Loc_RT = -1;
 GLint ScaleUV_Loc = -1;
 GLint OffsetUV_Loc = -1;
 GLint Opacity_Loc = -1;
+GLint flipFrame_Loc = -1;
 GLint Matrix_Loc_BLEND = -1;
 GLint ScaleUV_Loc_BLEND = -1;
 GLint OffsetUV_Loc_BLEND = -1;
@@ -532,7 +533,9 @@ void myPostSyncPreDrawFun()
 #ifdef RGBEASY_ENABLED
 	// Run a poll from the capturing
 	// If we are not doing that in the background
-	// Storing the result in fisheyeCaptureRT.texture
+    if (planeDPCaptureRunning.getVal()) {
+        RGBEasyCapturePollAndDraw(gPlaneDPCapture, planeDPCaptureRT);
+    }
 	if (fisheyeCaptureRunning.getVal()) {
 		RGBEasyCapturePollAndDraw(gFisheyeCapture, fisheyeCaptureRT);
 	}
@@ -649,11 +652,12 @@ void myDraw3DFun()
 			glUniform1f(TexMix_Loc_BLEND, mix);
 		}
 		else {
-			sgct::ShaderManager::instance()->bindShaderProgram("xform");
+			sgct::ShaderManager::instance()->bindShaderProgram("flipxform");
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, texIds.getValAt(domeTexIndex.getVal()));
 			glUniform2f(ScaleUV_Loc, 1.f, 1.f);
 			glUniform2f(OffsetUV_Loc, 0.f, 0.f);
+            glUniform1i(flipFrame_Loc, 0);
 			glUniform1f(Opacity_Loc, 1.f);
 			glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &MVP[0][0]);
 		}
@@ -684,7 +688,8 @@ void myDraw3DFun()
     }
     else
     {
-        sgct::ShaderManager::instance()->bindShaderProgram("xform");
+        sgct::ShaderManager::instance()->bindShaderProgram("flipxform");
+        glUniform1i(flipFrame_Loc, 0);
     }
 
     glFrontFace(GL_CCW);
@@ -703,7 +708,7 @@ void myDraw3DFun()
 		if (fulldomeMode)
 		{
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
+            glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
 			glm::vec2 texSize = glm::vec2(static_cast<float>(planceCaptureWidth), static_cast<float>(planeCaptureHeight));
 
 			glUniform1f(Opacity_L, 1.f);
@@ -739,7 +744,7 @@ void myDraw3DFun()
 					glBindTexture(GL_TEXTURE_2D, texIds.getValAt(planeAttributesGlobal.getVal()[i].planeTexId));
 				}
 				else {
-					glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
+                    glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
 				}
 
 				float planeOpacity = getContentPlaneOpacity(i);
@@ -1059,11 +1064,12 @@ void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT) {
 			glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &planeTransform[0][0]);
 		}
 		else {
-			sgct::ShaderManager::instance()->bindShaderProgram("xform");
+			sgct::ShaderManager::instance()->bindShaderProgram("flipxform");
 
 			//transform
 			glm::mat4 planeTransform = glm::mat4(1.0f);
 			glUniformMatrix4fv(Matrix_Loc, 1, GL_FALSE, &planeTransform[0][0]);
+            glUniform1i(flipFrame_Loc, flipFrame);
 		}
 
 		sgct_core::OffScreenBuffer * fbo = gEngine->getCurrentFBO();
@@ -1088,7 +1094,7 @@ void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT) {
 		//restore
 		if (fbo)
 			fbo->bind();
-		sgct::ShaderManager::instance()->bindShaderProgram("xform");
+		sgct::ShaderManager::instance()->bindShaderProgram("flipxform");
 		const int * coords = gEngine->getCurrentViewportPixelCoords();
 		glViewport(coords[0], coords[1], coords[2], coords[3]);
 	}
@@ -1475,17 +1481,18 @@ void myInitOGLFun()
     //create dome
     dome = new sgct_utils::SGCTDome(7.4f, 165.f, 256, 128);
 
-    sgct::ShaderManager::instance()->addShaderProgram( "xform",
-            "xform.vert",
+    sgct::ShaderManager::instance()->addShaderProgram( "flipxform",
+            "flip.vert",
             "xform.frag" );
 
-    sgct::ShaderManager::instance()->bindShaderProgram( "xform" );
+    sgct::ShaderManager::instance()->bindShaderProgram( "flipxform" );
 
-    Matrix_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation( "MVP" );
-    ScaleUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation("scaleUV");
-    OffsetUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation("offsetUV");
-	Opacity_Loc = sgct::ShaderManager::instance()->getShaderProgram("xform").getUniformLocation("opacity");
-    GLint Tex_Loc = sgct::ShaderManager::instance()->getShaderProgram( "xform").getUniformLocation( "Tex" );
+    Matrix_Loc = sgct::ShaderManager::instance()->getShaderProgram( "flipxform").getUniformLocation( "MVP" );
+    ScaleUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "flipxform").getUniformLocation("scaleUV");
+    OffsetUV_Loc = sgct::ShaderManager::instance()->getShaderProgram( "flipxform").getUniformLocation("offsetUV");
+    flipFrame_Loc = sgct::ShaderManager::instance()->getShaderProgram("flipxform").getUniformLocation("flipFrame");
+	Opacity_Loc = sgct::ShaderManager::instance()->getShaderProgram("flipxform").getUniformLocation("opacity");
+    GLint Tex_Loc = sgct::ShaderManager::instance()->getShaderProgram( "flipxform").getUniformLocation( "Tex" );
     glUniform1i( Tex_Loc, 0 );
 
 	sgct::ShaderManager::instance()->unBindShaderProgram();

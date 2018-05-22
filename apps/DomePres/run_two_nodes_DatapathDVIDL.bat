@@ -1,0 +1,2 @@
+start DomePres.exe -config two_nodes.xml -local 0 -host 127.0.0.2 -planecapture -fisheyecapture -flip
+start DomePres.exe -config two_nodes.xml -local 1 --slave -host 127.0.0.2 -planecapture -fisheyecapture -flip

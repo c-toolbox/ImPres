@@ -337,6 +337,11 @@ void uploadRGBEasyCaptureCPUData(void* data, unsigned long width, unsigned long 
 
         glfwMakeContextCurrent(hiddenRGBEasyCaptureCPUWindow);
 
+        if (!RGBEasyCaptureTexId)
+        {
+            RGBEasyCaptureTexId = allocateRGBEasyCaptureTexture();
+        }
+
         glGenBuffers(1, &RGBEasyCapturePBO);
 
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, RGBEasyCapturePBO);
@@ -575,10 +580,6 @@ void myInitOGLFun()
         sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
         if (thisNode->getAddress() == gRGBEasyCaptureCPU->getCaptureHost()) {
             if (gRGBEasyCaptureCPU->initialize()) {
-                if (!RGBEasyCaptureTexId)
-                {
-                    RGBEasyCaptureTexId = allocateRGBEasyCaptureTexture();
-                }
                 startRGBEasyCaptureCPU();
             }
         }
@@ -681,17 +682,6 @@ void myContextCreationCallback(GLFWwindow * win)
     }
 
     glfwMakeContextCurrent(sharedWindow);
-
-    /*glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
-
-    hiddenRGBEasyCaptureCPUWindow = glfwCreateWindow(1, 1, "Thread RGBEasy Capture Window", NULL, sharedWindow);
-    if (!hiddenRGBEasyCaptureCPUWindow)
-    {
-        sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
-    }
-    
-    //restore to normal
-    glfwMakeContextCurrent( sharedWindow );*/
 }
 
 void parseArguments(int& argc, char**& argv)

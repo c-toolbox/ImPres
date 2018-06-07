@@ -67,8 +67,8 @@ static COLOURMASK ColourMasks[] =
 };
 
 static USHORT gBitCount = 24;
-static unsigned long gWidth = 1920;
-static unsigned long gHeight = 1080;
+static unsigned long gWidth = 0;
+static unsigned long gHeight = 0;
 //callback function pointer
 static std::function<void(void* data, unsigned long width, unsigned long height)> gCaptureCallback = nullptr;
 

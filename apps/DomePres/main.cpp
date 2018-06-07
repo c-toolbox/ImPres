@@ -24,7 +24,7 @@
 #include <FFmpegCapture.hpp>
 
 #ifdef RGBEASY_ENABLED
-#include <RGBEasyCapture.hpp>
+#include <RGBEasyCaptureGPU.hpp>
 #endif
 
 #ifdef ZXING_ENABLED
@@ -100,8 +100,8 @@ std::vector<std::string> split(const std::string &s, char delim) {
 sgct::Engine * gEngine;
 FFmpegCapture* gPlaneCapture = NULL;
 #ifdef RGBEASY_ENABLED
-RGBEasyCapture* gFisheyeCapture = NULL;
-RGBEasyCapture* gPlaneDPCapture = NULL;
+RGBEasyCaptureGPU* gFisheyeCapture = NULL;
+RGBEasyCaptureGPU* gPlaneDPCapture = NULL;
 #endif
 
 //sgct callbacks
@@ -258,7 +258,7 @@ double sendTimer = 0.0;
 enum imageType { IM_JPEG, IM_PNG };
 const int headerSize = 1;
 
-//Captures (FFmpegCapture and RGBEasyCapture)
+//Captures (FFmpegCapture and RGBEasyCaptureGPU)
 void uploadCaptureData(uint8_t ** data, int width, int height);
 void parseArguments(int& argc, char**& argv);
 GLuint allocateCaptureTexture();
@@ -288,8 +288,8 @@ void fisheyeCaptureLoop();
 void startFisheyeCapture();
 void stopFisheyeCapture();
 
-void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT);
-void RGBEasyRenderToTextureSetup(RGBEasyCapture* capture, RT& captureRT);
+void RGBEasyCaptureGPUPollAndDraw(RGBEasyCaptureGPU* capture, RT& captureRT);
+void RGBEasyRenderToTextureSetup(RGBEasyCaptureGPU* capture, RT& captureRT);
 #endif
 
 GLint Matrix_Loc = -1;
@@ -377,8 +377,8 @@ int main( int argc, char* argv[] )
     gEngine = new sgct::Engine( argc, argv );
     gPlaneCapture = new FFmpegCapture();
 #ifdef RGBEASY_ENABLED
-	gFisheyeCapture = new RGBEasyCapture();
-	gPlaneDPCapture = new RGBEasyCapture();
+	gFisheyeCapture = new RGBEasyCaptureGPU();
+	gPlaneDPCapture = new RGBEasyCaptureGPU();
 #endif
 
     // arguments:
@@ -534,10 +534,10 @@ void myPostSyncPreDrawFun()
 	// Run a poll from the capturing
 	// If we are not doing that in the background
     if (planeDPCaptureRunning.getVal()) {
-        RGBEasyCapturePollAndDraw(gPlaneDPCapture, planeDPCaptureRT);
+        RGBEasyCaptureGPUPollAndDraw(gPlaneDPCapture, planeDPCaptureRT);
     }
 	if (fisheyeCaptureRunning.getVal()) {
-		RGBEasyCapturePollAndDraw(gFisheyeCapture, fisheyeCaptureRT);
+		RGBEasyCaptureGPUPollAndDraw(gFisheyeCapture, fisheyeCaptureRT);
 	}
 #endif
 
@@ -1053,7 +1053,7 @@ void fisheyeCaptureLoop() {
 	}
 }
 
-void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT) {
+void RGBEasyCaptureGPUPollAndDraw(RGBEasyCaptureGPU* capture, RT& captureRT) {
 	if (capture->prepareForRendering()) {
 		//Rendering to square texture when assumig ganing (i.e. from 2x1 to 1x2) as 1x2 does not seem to function properly
 		if (capture->getGanging()) {
@@ -1100,7 +1100,7 @@ void RGBEasyCapturePollAndDraw(RGBEasyCapture* capture, RT& captureRT) {
 	}
 }
 
-void RGBEasyRenderToTextureSetup(RGBEasyCapture* capture, RT& captureRT) {
+void RGBEasyRenderToTextureSetup(RGBEasyCaptureGPU* capture, RT& captureRT) {
 	// check if we are ganing inputs
 	// thus we assume 2x1 (sbs) which we want to change to 1x2 (tb)
 	if (capture->getGanging()) {

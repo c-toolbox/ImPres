@@ -24,7 +24,8 @@
 #include <FFmpegCapture.hpp>
 
 #ifdef RGBEASY_ENABLED
-#include <RGBEasyCapture.hpp>
+#include <RGBEasyCaptureCPU.hpp>
+#include <RGBEasyCaptureGPU.hpp>
 #endif
 
 std::string getFileName(const std::string& s) {
@@ -62,7 +63,8 @@ std::vector<std::string> split(const std::string &s, char delim) {
 sgct::Engine * gEngine;
 FFmpegCapture* gFFmpegCapture = NULL;
 #ifdef RGBEASY_ENABLED
-RGBEasyCapture* gRGBEasyCapture = NULL;
+RGBEasyCaptureCPU* gRGBEasyCaptureCPU = NULL;
+RGBEasyCaptureGPU* gRGBEasyCaptureGPU = NULL;
 #endif
 
 //sgct callbacks
@@ -81,7 +83,7 @@ void myContextCreationCallback(GLFWwindow * win);
 sgct_utils::SGCTPlane * RTsquare = NULL;
 
 GLFWwindow * hiddenFFmpegCaptureWindow;
-GLFWwindow * hiddenRGBEasyCaptureWindow;
+GLFWwindow * hiddenRGBEasyCaptureCPUWindow;
 GLFWwindow * sharedWindow;
 
 //variables to share across cluster
@@ -91,19 +93,25 @@ sgct::SharedBool stats(false);
 sgct::SharedFloat fadingTime(2.0f);
 
 //Captures (FFmpegCapture and RGBEasyCapture)
-void uploadCaptureData(uint8_t ** data, int width, int height);
+void uploadFFmpegCaptureData(uint8_t ** data, int width, int height);
 void parseArguments(int& argc, char**& argv);
-GLuint allocateCaptureTexture();
+GLuint allocateFFmpegCaptureTexture();
+GLuint allocateRGBEasyCaptureTexture();
 void ffmpegCaptureLoop();
 void startFFmpegCapture();
 void stopFFmpegCapture();
 
 #ifdef RGBEASY_ENABLED
-void rgbEasyCaptureLoop();
-void rgbEasyCapturePollAndDraw();
+void uploadRGBEasyCaptureCPUData(void* data, unsigned long width, unsigned long height);
+void RGBEasyCaptureCPULoop();
+void startRGBEasyCaptureCPU();
+void stopRGBEasyCaptureCPU();
+
+void RGBEasyCaptureGPULoop();
+void RGBEasyCaptureGPUPollAndDraw();
 void rgbEasyRenderToTextureSetup();
-void startRGBEasyCapture();
-void stopRGBEasyCapture();
+void startRGBEasyCaptureGPU();
+void stopRGBEasyCaptureGPU();
 #endif
 
 void calculateStats();
@@ -125,16 +133,21 @@ GLint OffsetUV_Loc = -1;
 GLint flipFrame_Loc = -1;
 
 GLuint ffmpegCaptureTexId = GL_FALSE;
+GLuint RGBEasyCaptureTexId = GL_FALSE;
+GLuint RGBEasyCapturePBO = GL_FALSE;
 
 std::thread * ffmpegCaptureThread;
-std::thread * rgbEasyCaptureThread;
+std::thread * RGBEasyCaptureCPUThread;
+std::thread * RGBEasyCaptureGPUThread;
 
 bool flipFrame = false;
 bool ffmpegCaptureRequested = false;
-bool rgbEasyCaptureRequested = false;
+bool RGBEasyCaptureCPURequested = false;
+bool RGBEasyCaptureGPURequested = false;
 
 sgct::SharedBool ffmpegCaptureRunning(true);
-sgct::SharedBool rgbEasyCaptureRunning(true);
+sgct::SharedBool RGBEasyCaptureCPURunning(true);
+sgct::SharedBool RGBEasyCaptureGPURunning(true);
 sgct::SharedInt captureLockStatus(0);
 sgct::SharedDouble captureRate(0.0);
 
@@ -145,7 +158,8 @@ int main( int argc, char* argv[] )
     gEngine = new sgct::Engine( argc, argv );
     gFFmpegCapture = new FFmpegCapture();
 #ifdef RGBEASY_ENABLED
-	gRGBEasyCapture = new RGBEasyCapture();
+    gRGBEasyCaptureCPU = new RGBEasyCaptureCPU();
+	gRGBEasyCaptureGPU = new RGBEasyCaptureGPU();
 #endif
 
     // arguments:
@@ -193,14 +207,14 @@ int main( int argc, char* argv[] )
 		stopFFmpegCapture();
 
 #ifdef RGBEASY_ENABLED
-	if (rgbEasyCaptureRunning.getVal())
-		stopRGBEasyCapture();
+	if (RGBEasyCaptureGPURunning.getVal())
+		stopRGBEasyCaptureGPU();
 #endif
 
     // Clean up
     delete gFFmpegCapture;
 #ifdef RGBEASY_ENABLED
-	delete gRGBEasyCapture;
+	delete gRGBEasyCaptureGPU;
 #endif
     delete gEngine;
 
@@ -225,8 +239,8 @@ void myPostSyncPreDrawFun()
 	// Run a poll from the capturing
 	// If we are not doing that in the background
 	// Storing the result in captureRT.texture
-	if (rgbEasyCaptureRunning.getVal()) {
-		rgbEasyCapturePollAndDraw();
+	if (RGBEasyCaptureGPURunning.getVal()) {
+		RGBEasyCaptureGPUPollAndDraw();
 	}
 #endif
 }
@@ -240,7 +254,10 @@ void myDraw3DFun()
 	if(ffmpegCaptureRequested) {
 		glBindTexture(GL_TEXTURE_2D, ffmpegCaptureTexId);
 	}
-	else if (rgbEasyCaptureRequested) {
+    else if (RGBEasyCaptureCPURequested) {
+        glBindTexture(GL_TEXTURE_2D, RGBEasyCaptureTexId);
+    }
+	else if (RGBEasyCaptureGPURequested) {
 		glBindTexture(GL_TEXTURE_2D, captureRT.texture);
 	}
 	glUniform2f(ScaleUV_Loc, 1.f, 1.f);
@@ -306,31 +323,105 @@ void stopFFmpegCapture()
 }
 
 #ifdef RGBEASY_ENABLED
-void startRGBEasyCapture()
+void uploadRGBEasyCaptureCPUData(void* data, unsigned long width, unsigned long height) {
+    int dataSize = gRGBEasyCaptureCPU->getWidth() * gRGBEasyCaptureCPU->getHeight() * 3;
+
+    if (!hiddenRGBEasyCaptureCPUWindow) {
+        glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
+
+        hiddenRGBEasyCaptureCPUWindow = glfwCreateWindow(1, 1, "Thread RGBEasy Capture Window", NULL, sharedWindow);
+        if (!hiddenRGBEasyCaptureCPUWindow)
+        {
+            sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
+        }
+
+        glfwMakeContextCurrent(hiddenRGBEasyCaptureCPUWindow);
+
+        glGenBuffers(1, &RGBEasyCapturePBO);
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, RGBEasyCapturePBO);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
+    }
+    else
+        glfwMakeContextCurrent(hiddenRGBEasyCaptureCPUWindow);
+
+    void* GPU_ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+    if (GPU_ptr)
+    {
+        memcpy(GPU_ptr, data, dataSize);
+
+        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, RGBEasyCaptureTexId);
+
+        //Assuming BGR24
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+    }
+
+    glfwMakeContextCurrent(NULL); //detach context
+}
+
+void RGBEasyCaptureCPULoop() {
+    gRGBEasyCaptureCPU->runCapture();
+    while (RGBEasyCaptureCPURunning.getVal()) {
+        // Frame capture running...
+        sgct::Engine::sleep(0.02);
+    }
+
+    glfwMakeContextCurrent(hiddenRGBEasyCaptureCPUWindow);
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    glDeleteBuffers(1, &RGBEasyCapturePBO);
+
+    glfwMakeContextCurrent(NULL); //detach context
+}
+
+void startRGBEasyCaptureCPU() {
+    //start capture thread if host or load thread if master and not host
+    sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
+    if (thisNode->getAddress() == gRGBEasyCaptureCPU->getCaptureHost()) {
+        RGBEasyCaptureCPURunning.setVal(true);
+        RGBEasyCaptureCPUThread = new (std::nothrow) std::thread(RGBEasyCaptureCPULoop);
+    }
+}
+
+void stopRGBEasyCaptureCPU() {
+    //kill capture thread
+    RGBEasyCaptureCPURunning.setVal(false);
+    if (RGBEasyCaptureCPUThread)
+    {
+        RGBEasyCaptureCPUThread->join();
+        delete RGBEasyCaptureCPUThread;
+    }
+}
+
+void startRGBEasyCaptureGPU()
 {
 	//start capture thread if host or load thread if master and not host
 	sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();	
-	if (thisNode->getAddress() == gRGBEasyCapture->getCaptureHost()) {
-		rgbEasyCaptureRunning.setVal(true);
-		rgbEasyCaptureThread = new (std::nothrow) std::thread(rgbEasyCaptureLoop);
+	if (thisNode->getAddress() == gRGBEasyCaptureGPU->getCaptureHost()) {
+		RGBEasyCaptureGPURunning.setVal(true);
+		RGBEasyCaptureGPUThread = new (std::nothrow) std::thread(RGBEasyCaptureGPULoop);
 	}
 }
 
-void stopRGBEasyCapture()
+void stopRGBEasyCaptureGPU()
 {
 	//kill capture thread
-	rgbEasyCaptureRunning.setVal(false);
-	if (rgbEasyCaptureThread)
+	RGBEasyCaptureGPURunning.setVal(false);
+	if (RGBEasyCaptureGPUThread)
 	{
-		rgbEasyCaptureThread->join();
-		delete rgbEasyCaptureThread;
+		RGBEasyCaptureGPUThread->join();
+		delete RGBEasyCaptureGPUThread;
 	}
 }
 
-void rgbEasyCapturePollAndDraw() {
-	if (gRGBEasyCapture->prepareForRendering()) {
+void RGBEasyCaptureGPUPollAndDraw() {
+	if (gRGBEasyCaptureGPU->prepareForRendering()) {
 		//Rendering to square texture when assumig ganing (i.e. from 2x1 to 1x2) as 1x2 does not seem to function properly
-		if (gRGBEasyCapture->getGanging()) {
+		if (gRGBEasyCaptureGPU->getGanging()) {
 			sgct::ShaderManager::instance()->bindShaderProgram("sbs2tb");
 
 			//transform
@@ -363,7 +454,7 @@ void rgbEasyCapturePollAndDraw() {
 		sgct::ShaderManager::instance()->unBindShaderProgram();
 
 		//give capture buffer back to RGBEasy
-		gRGBEasyCapture->renderingCompleted();
+		gRGBEasyCaptureGPU->renderingCompleted();
 
 		//restore
 		if (fbo)
@@ -374,9 +465,9 @@ void rgbEasyCapturePollAndDraw() {
 	}
 }
 
-void rgbEasyCaptureLoop() {
-	gRGBEasyCapture->runCapture();
-	while (rgbEasyCaptureRunning.getVal()) {
+void RGBEasyCaptureGPULoop() {
+	gRGBEasyCaptureGPU->runCapture();
+	while (RGBEasyCaptureGPURunning.getVal()) {
 		// Frame capture running...
 	}
 }
@@ -384,13 +475,13 @@ void rgbEasyCaptureLoop() {
 void rgbEasyRenderToTextureSetup() {
 	// check if we are ganing inputs
 	// thus we assume 2x1 (sbs) which we want to change to 1x2 (tb)
-	if (gRGBEasyCapture->getGanging()) {
-		captureRT.width = gRGBEasyCapture->getWidth() / 2;
-		captureRT.height = gRGBEasyCapture->getHeight() * 2;
+	if (gRGBEasyCaptureGPU->getGanging()) {
+		captureRT.width = gRGBEasyCaptureGPU->getWidth() / 2;
+		captureRT.height = gRGBEasyCaptureGPU->getHeight() * 2;
 	}
 	else {
-		captureRT.width = gRGBEasyCapture->getWidth();
-		captureRT.height = gRGBEasyCapture->getHeight();
+		captureRT.width = gRGBEasyCaptureGPU->getWidth();
+		captureRT.height = gRGBEasyCaptureGPU->getHeight();
 	}
 
 	captureRT.fbo = GL_FALSE;
@@ -450,7 +541,7 @@ void myInitOGLFun()
 		bool captureReady = gFFmpegCapture->init();
 		//allocate texture
 		if (captureReady) {
-			ffmpegCaptureTexId = allocateCaptureTexture();
+			ffmpegCaptureTexId = allocateFFmpegCaptureTexture();
 		}
 
 		if (captureReady) {
@@ -460,27 +551,43 @@ void myInitOGLFun()
 	}
 
 #ifdef RGBEASY_ENABLED
-	// due a high-frame rate rgbEasy capturing (if requested)
-	if (rgbEasyCaptureRequested) {
+	// do a high-frame rate rgbEasy capturing (if requested)
+	if (RGBEasyCaptureGPURequested) {
 		sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
 		captureRT.texture = GL_FALSE;
-		if (thisNode->getAddress() == gRGBEasyCapture->getCaptureHost()) {
-			if (gRGBEasyCapture->initialize()) {
+		if (thisNode->getAddress() == gRGBEasyCaptureGPU->getCaptureHost()) {
+			if (gRGBEasyCaptureGPU->initialize()) {
 
 				// Perform Capture OpenGL operations on MAIN thread
 				// initalize capture OpenGL (running on this thread)
-				gRGBEasyCapture->initializeGL();
+				gRGBEasyCaptureGPU->initializeGL();
 				rgbEasyRenderToTextureSetup();
 
 				// Perform frame capture on BACKGROUND thread
 				// start capture thread (which will intialize RGBEasy things)
-				startRGBEasyCapture();
+				startRGBEasyCaptureGPU();
 			}
 		}
 	}
+
+    // do CPU based grabbing if requested
+    if (RGBEasyCaptureCPURequested) {
+        sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
+        if (thisNode->getAddress() == gRGBEasyCaptureCPU->getCaptureHost()) {
+            if (gRGBEasyCaptureCPU->initialize()) {
+                if (!RGBEasyCaptureTexId)
+                {
+                    RGBEasyCaptureTexId = allocateRGBEasyCaptureTexture();
+                }
+                startRGBEasyCaptureCPU();
+            }
+        }
+        std::function<void(void* data, unsigned long width, unsigned long height)> callback = uploadRGBEasyCaptureCPUData;
+        gRGBEasyCaptureCPU->setCaptureCallback(callback);
+    }
 #endif
 
-    std::function<void(uint8_t ** data, int width, int height)> callback = uploadCaptureData;
+    std::function<void(uint8_t ** data, int width, int height)> callback = uploadFFmpegCaptureData;
     gFFmpegCapture->setVideoDecoderCallback(callback);
 
 	//create RT square
@@ -531,6 +638,15 @@ void myCleanUpFun()
      
     if(hiddenFFmpegCaptureWindow)
         glfwDestroyWindow(hiddenFFmpegCaptureWindow);
+
+    if (RGBEasyCaptureTexId)
+    {
+        glDeleteTextures(1, &RGBEasyCaptureTexId);
+        RGBEasyCaptureTexId = GL_FALSE;
+    }
+
+    if (hiddenRGBEasyCaptureCPUWindow)
+        glfwDestroyWindow(hiddenRGBEasyCaptureCPUWindow);
 }
 
 void myKeyCallback(int key, int action)
@@ -558,14 +674,24 @@ void myContextCreationCallback(GLFWwindow * win)
     
     sharedWindow = win;
 
-    hiddenFFmpegCaptureWindow = glfwCreateWindow( 1, 1, "Thread Capture Window", NULL, sharedWindow ); 
+    hiddenFFmpegCaptureWindow = glfwCreateWindow( 1, 1, "Thread FFmpeg Capture Window", NULL, sharedWindow );
     if( !hiddenFFmpegCaptureWindow)
+    {
+        sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
+    }
+
+    glfwMakeContextCurrent(sharedWindow);
+
+    /*glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
+
+    hiddenRGBEasyCaptureCPUWindow = glfwCreateWindow(1, 1, "Thread RGBEasy Capture Window", NULL, sharedWindow);
+    if (!hiddenRGBEasyCaptureCPUWindow)
     {
         sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
     }
     
     //restore to normal
-    glfwMakeContextCurrent( sharedWindow );
+    glfwMakeContextCurrent( sharedWindow );*/
 }
 
 void parseArguments(int& argc, char**& argv)
@@ -577,7 +703,8 @@ void parseArguments(int& argc, char**& argv)
         {
             gFFmpegCapture->setVideoHost(std::string(argv[i + 1]));
 #ifdef RGBEASY_ENABLED
-			gRGBEasyCapture->setCaptureHost(std::string(argv[i + 1]));
+            gRGBEasyCaptureCPU->setCaptureHost(std::string(argv[i + 1]));
+			gRGBEasyCaptureGPU->setCaptureHost(std::string(argv[i + 1]));
 #endif
         }
 		else if (strcmp(argv[i], "-ffmpegcapture") == 0)
@@ -601,21 +728,27 @@ void parseArguments(int& argc, char**& argv)
 			flipFrame = true;
 		}
 #ifdef RGBEASY_ENABLED
-		else if (strcmp(argv[i], "-rgbeasycapture") == 0)
+		else if (strcmp(argv[i], "-rgbeasycapturecpu") == 0)
 		{
-			rgbEasyCaptureRequested = true;
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy capture requested\n");
+			RGBEasyCaptureCPURequested = true;
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy CPU capture requested\n");
 		}
+        else if (strcmp(argv[i], "-rgbeasycapturegpu") == 0)
+        {
+            RGBEasyCaptureGPURequested = true;
+            sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy GPU capture requested\n");
+        }
 		else if (strcmp(argv[i], "-rgbeasyinput") == 0 && argc >(i + 1))
 		{
 			int captureInput = static_cast<int>(atoi(argv[i + 1]));
-			gRGBEasyCapture->setCaptureInput(captureInput);
+            gRGBEasyCaptureCPU->setCaptureInput(captureInput);
+			gRGBEasyCaptureGPU->setCaptureInput(captureInput);
 			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy capture on input %i\n", captureInput);
 
 		}
 		else if (strcmp(argv[i], "-rgbeasyganging") == 0)
 		{
-			gRGBEasyCapture->setCaptureGanging(true);
+			gRGBEasyCaptureGPU->setCaptureGanging(true);
 			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "RGBEasy/capture ganging enabled\n");
 		}
 #endif
@@ -624,10 +757,39 @@ void parseArguments(int& argc, char**& argv)
     }
 }
 
-GLuint allocateCaptureTexture()
+GLuint allocateFFmpegCaptureTexture()
 {
     int w = gFFmpegCapture->getWidth();
     int h = gFFmpegCapture->getHeight();
+
+    if (w * h <= 0)
+    {
+        sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Invalid texture size (%dx%d)!\n", w, h);
+        return 0;
+    }
+    sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Capture texture size (%dx%d)!\n", w, h);
+
+    GLuint texId;
+    glGenTextures(1, &texId);
+    glBindTexture(GL_TEXTURE_2D, texId);
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, w, h);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    return texId;
+}
+
+GLuint allocateRGBEasyCaptureTexture()
+{
+    int w = gRGBEasyCaptureCPU->getWidth();
+    int h = gRGBEasyCaptureCPU->getHeight();
 
     if (w * h <= 0)
     {
@@ -653,7 +815,7 @@ GLuint allocateCaptureTexture()
 	return texId;
 }
 
-void uploadCaptureData(uint8_t ** data, int width, int height)
+void uploadFFmpegCaptureData(uint8_t ** data, int width, int height)
 {
     // At least two textures and GLSync objects
     // should be used to control that the uploaded texture is the same
@@ -666,9 +828,9 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 		{
 			int dataOffset = 0;
 			int stride = width * 3; //Assuming BGR24
-			/*if (gFFmpegCapture->isFormatYUYV422()) {
+			if (gFFmpegCapture->isFormatYUYV422()) {
 				stride = width * 2;
-			}*/
+			}
 
 			for (int row = height - 1; row > -1; row--)
 			{
@@ -681,14 +843,14 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, ffmpegCaptureTexId);
 
-			/*if (gFFmpegCapture->isFormatYUYV422()) {
+			if (gFFmpegCapture->isFormatYUYV422()) {
 				//AV_PIX_FMT_YUYV422
 				//int y1, u, y2, v;
 				glTexImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, 0);
 			}
 			else { //Assuming BGR24*/
 				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
-			//}
+			}
 		}
 
 		//calculateStats();

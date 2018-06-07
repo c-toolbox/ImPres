@@ -31,7 +31,7 @@ History:
 
 *******************************************************************************/
 
-#include "RGBEasyCapture.hpp"
+#include "RGBEasyCaptureGPU.hpp"
 #include <sgct.h>
 
 #include <rgb.h>
@@ -414,7 +414,7 @@ SetupOpenGLTextures()
 
 	if (!sgct::Engine::checkForOGLErrors()) //if error occured
 	{
-		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "RGBEasyCapture : Setup OpenGL Textures failed\n");
+		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "RGBEasyCaptureGPU : Setup OpenGL Textures failed\n");
 		void cleanup();
 	}
 }
@@ -452,7 +452,7 @@ SetupDirectGPU()
 
 	if (!sgct::Engine::checkForOGLErrors()) //if error occured
 	{
-		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "RGBEasyCapture : Setup Direct GPU Transfer failed\n");
+		sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "RGBEasyCaptureGPU : Setup Direct GPU Transfer failed\n");
 		void cleanup();
 	}
 
@@ -477,7 +477,7 @@ SetupDirectGPU()
 	{
 		/*if (!sgct::Engine::checkForOGLErrors()) //if error occured
 		{
-			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "RGBEasyCapture : Init Direct GPU Transfer failed\n");
+			sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "RGBEasyCaptureGPU : Init Direct GPU Transfer failed\n");
 			void cleanup();
 		}*/
 
@@ -601,17 +601,17 @@ CloseRGBEasy()
 	}
 }
 
-RGBEasyCapture::RGBEasyCapture()
+RGBEasyCaptureGPU::RGBEasyCaptureGPU()
 {
 	mCaptureHost = "";
 	mCaptureGanging = false;
 }
 
-RGBEasyCapture::~RGBEasyCapture()
+RGBEasyCaptureGPU::~RGBEasyCaptureGPU()
 {
 }
 
-bool RGBEasyCapture::initialize()
+bool RGBEasyCaptureGPU::initialize()
 {
 	Global.Error = RGBLoad(&Global.HRGBDLL);
 	if (Global.Error)
@@ -670,7 +670,7 @@ bool RGBEasyCapture::initialize()
 	return false;
 }
 
-void RGBEasyCapture::deinitialize()
+void RGBEasyCaptureGPU::deinitialize()
 {
 	StopCapture();
 	CloseRGBEasy();
@@ -680,7 +680,7 @@ void RGBEasyCapture::deinitialize()
 	CloseHandle(Global.HCapturedBuffer);
 }
 
-bool RGBEasyCapture::initializeGL()
+bool RGBEasyCaptureGPU::initializeGL()
 {
 	int            j;
 	unsigned int   index;
@@ -717,13 +717,13 @@ bool RGBEasyCapture::initializeGL()
 	return false;
 }
 
-void RGBEasyCapture::deinitializeGL()
+void RGBEasyCaptureGPU::deinitializeGL()
 {
 	FreeBitmapInformation();
 	FreeOpenGLSetup();
 }
 
-void RGBEasyCapture::runCapture()
+void RGBEasyCaptureGPU::runCapture()
 {
 	/* Wait for the OpenGL initialisation to finish. */
 	if (WaitForSingleObject(Global.HOGLSetupEvent, INFINITE)
@@ -734,7 +734,7 @@ void RGBEasyCapture::runCapture()
 	}
 }
 
-bool RGBEasyCapture::prepareForRendering() {
+bool RGBEasyCaptureGPU::prepareForRendering() {
 	/* Wait for access to the protected buffer index variable. */
 	WaitForSingleObject(Global.HMutex, INFINITE);
 	/* Take a local copy of Global.BufferIndex so buffer mutex can be
@@ -789,7 +789,7 @@ bool RGBEasyCapture::prepareForRendering() {
 	return false;
 }
 
-void RGBEasyCapture::renderingCompleted() {
+void RGBEasyCaptureGPU::renderingCompleted() {
 	if (currentBufferIndex != NO_BUFFER)
 	{
 		glBindTexture(GL_TEXTURE_2D, 0);
@@ -820,33 +820,33 @@ void RGBEasyCapture::renderingCompleted() {
 	WaitForSingleObject(Global.HCapturedBuffer, INFINITE);
 }
 
-std::string RGBEasyCapture::getCaptureHost() const
+std::string RGBEasyCaptureGPU::getCaptureHost() const
 {
 	return mCaptureHost;
 }
 
-void RGBEasyCapture::setCaptureHost(std::string hostAdress)
+void RGBEasyCaptureGPU::setCaptureHost(std::string hostAdress)
 {
     mCaptureHost = hostAdress;
 }
 
-void RGBEasyCapture::setCaptureInput(int input)
+void RGBEasyCaptureGPU::setCaptureInput(int input)
 {
 	Global.Input = input;
 }
 
-void RGBEasyCapture::setCaptureGanging(bool doGanging) {
+void RGBEasyCaptureGPU::setCaptureGanging(bool doGanging) {
 	mCaptureGanging = true;
 }
 
-unsigned long  RGBEasyCapture::getWidth() {
+unsigned long  RGBEasyCaptureGPU::getWidth() {
 	return Global.Width;
 }
 
-unsigned long RGBEasyCapture::getHeight() {
+unsigned long RGBEasyCaptureGPU::getHeight() {
 	return Global.Height;
 }
 
-bool RGBEasyCapture::getGanging() {
+bool RGBEasyCaptureGPU::getGanging() {
 	return mCaptureGanging;
 }

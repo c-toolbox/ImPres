@@ -106,7 +106,9 @@ if(RGBEASY_ENABLE)
 	if(RGBEASY_INCLUDE_DIRECTORY AND RGBEASY_LIBARIES_DIRECTORY)
 		add_definitions(-DRGBEASY_ENABLED)
 	endif()
-	set(IMPRES_RGBEASY_SRC 
+	set(IMPRES_RGBEASY_SRC
+	${CMAKE_SOURCE_DIR}/shared/RGBEasyCaptureCPU.cpp
+	${CMAKE_SOURCE_DIR}/shared/RGBEasyCaptureCPU.hpp	
 	${CMAKE_SOURCE_DIR}/shared/RGBEasyCaptureGPU.cpp
 	${CMAKE_SOURCE_DIR}/shared/RGBEasyCaptureGPU.hpp)
 else()

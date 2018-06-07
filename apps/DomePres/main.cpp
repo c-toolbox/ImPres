@@ -24,6 +24,7 @@
 #include <FFmpegCapture.hpp>
 
 #ifdef RGBEASY_ENABLED
+#include <RGBEasyCaptureCPU.hpp>
 #include <RGBEasyCaptureGPU.hpp>
 #endif
 
@@ -100,8 +101,8 @@ std::vector<std::string> split(const std::string &s, char delim) {
 sgct::Engine * gEngine;
 FFmpegCapture* gPlaneCapture = NULL;
 #ifdef RGBEASY_ENABLED
+RGBEasyCaptureCPU* gPlaneDPCapture = NULL;
 RGBEasyCaptureGPU* gFisheyeCapture = NULL;
-RGBEasyCaptureGPU* gPlaneDPCapture = NULL;
 #endif
 
 //sgct callbacks
@@ -126,7 +127,7 @@ sgct_utils::SGCTDome * dome = NULL;
 sgct_utils::SGCTPlane * RTsquare = NULL;
 
 GLFWwindow * hiddenPlaneCaptureWindow;
-GLFWwindow * hiddenFisheyeCaptureWindow;
+GLFWwindow * hiddenPlaneDPCaptureWindow;
 GLFWwindow * hiddenTransferWindow;
 GLFWwindow * sharedWindow;
 
@@ -276,10 +277,10 @@ struct RT
 	unsigned long width;
 	unsigned long height;
 };
-RT planeDPCaptureRT;
 RT fisheyeCaptureRT;
 
 #ifdef RGBEASY_ENABLED
+void uploadRGBEasyCapturePlaneData(void* data, unsigned long width, unsigned long height);
 void planeDPCaptureLoop();
 void startPlaneDPCapture();
 void stopPlaneDPCapture();
@@ -287,7 +288,6 @@ void stopPlaneDPCapture();
 void fisheyeCaptureLoop();
 void startFisheyeCapture();
 void stopFisheyeCapture();
-
 void RGBEasyCaptureGPUPollAndDraw(RGBEasyCaptureGPU* capture, RT& captureRT);
 void RGBEasyRenderToTextureSetup(RGBEasyCaptureGPU* capture, RT& captureRT);
 #endif
@@ -310,6 +310,8 @@ GLint ChromaKeyColor_Loc_CK = -1;
 GLint ChromaKeyFactor_Loc_CK = -1;
 
 GLuint planeCaptureTexId = GL_FALSE;
+GLuint planeDPCaptureTexId = GL_FALSE;
+GLuint planeDPCapturePBO = GL_FALSE;
 int planceCaptureWidth = 0;
 int planeCaptureHeight = 0;
 
@@ -377,8 +379,8 @@ int main( int argc, char* argv[] )
     gEngine = new sgct::Engine( argc, argv );
     gPlaneCapture = new FFmpegCapture();
 #ifdef RGBEASY_ENABLED
+    gPlaneDPCapture = new RGBEasyCaptureCPU();
 	gFisheyeCapture = new RGBEasyCaptureGPU();
-	gPlaneDPCapture = new RGBEasyCaptureGPU();
 #endif
 
     // arguments:
@@ -533,9 +535,6 @@ void myPostSyncPreDrawFun()
 #ifdef RGBEASY_ENABLED
 	// Run a poll from the capturing
 	// If we are not doing that in the background
-    if (planeDPCaptureRunning.getVal()) {
-        RGBEasyCaptureGPUPollAndDraw(gPlaneDPCapture, planeDPCaptureRT);
-    }
 	if (fisheyeCaptureRunning.getVal()) {
 		RGBEasyCaptureGPUPollAndDraw(gFisheyeCapture, fisheyeCaptureRT);
 	}
@@ -997,6 +996,73 @@ void stopPlaneCapture()
 }
 
 #ifdef RGBEASY_ENABLED
+void uploadRGBEasyCapturePlaneData(void* data, unsigned long width, unsigned long height) {
+    if (!planeDPCaptureRunning.getVal())
+        return;
+
+    int dataSize = gPlaneDPCapture->getWidth() * gPlaneDPCapture->getHeight() * 3;
+
+    if (!hiddenPlaneDPCaptureWindow) {
+        glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
+
+        hiddenPlaneDPCaptureWindow = glfwCreateWindow(1, 1, "Thread RGBEasy Capture Window", NULL, sharedWindow);
+        if (!hiddenPlaneDPCaptureWindow)
+        {
+            sgct::MessageHandler::instance()->print("Failed to create capture context!\n");
+        }
+
+        glfwMakeContextCurrent(hiddenPlaneDPCaptureWindow);
+
+        if (!planeCaptureTexId)
+        {
+            planceCaptureWidth = width;
+            planeCaptureHeight = height;
+            planeCaptureTexId = allocateCaptureTexture();
+            planeReCreate.setVal(true);
+        }
+
+        glGenBuffers(1, &planeDPCapturePBO);
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, planeDPCapturePBO);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, dataSize, 0, GL_DYNAMIC_DRAW);
+    }
+    else
+        glfwMakeContextCurrent(hiddenPlaneDPCaptureWindow);
+
+    void* GPU_ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+    if (GPU_ptr)
+    {
+
+        if (flipFrame)
+        {
+            int dataOffset = 0;
+            int stride = width * 3; //Assuming BGR24
+            unsigned char* GPU_ptrUC = static_cast<unsigned char*>(GPU_ptr);
+            unsigned char* dataUC = static_cast<unsigned char*>(data);
+            for (int row = height - 1; row > -1; row--)
+            {
+                memcpy(GPU_ptrUC + dataOffset, dataUC + row * stride, stride);
+                dataOffset += stride;
+            }
+        }
+        else
+        {
+            
+            memcpy(GPU_ptr, data, dataSize);
+        }
+
+        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
+
+        //Assuming BGR24
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+    }
+
+    glfwMakeContextCurrent(NULL); //detach context
+}
+
 void startPlaneDPCapture()
 {
 	//start capture thread if host or load thread if master and not host
@@ -1022,7 +1088,16 @@ void planeDPCaptureLoop() {
 	gPlaneDPCapture->runCapture();
 	while (planeDPCaptureRunning.getVal()) {
 		// Frame capture running...
-	}
+        sgct::Engine::sleep(0.02);
+    }
+
+    glfwMakeContextCurrent(hiddenPlaneDPCaptureWindow);
+
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+    glDeleteBuffers(1, &planeDPCapturePBO);
+
+    glfwMakeContextCurrent(NULL); //detach context
 }
 
 void startFisheyeCapture()
@@ -1377,25 +1452,19 @@ void myInitOGLFun()
 	// do a high-frame rate fisheye capturing (if requested)
 	if (planeDPCaptureRequested) {
 		sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
-		planeDPCaptureRT.texture = GL_FALSE;
 		if (thisNode->getAddress() == gPlaneDPCapture->getCaptureHost()) {
 			if (gPlaneDPCapture->initialize()) {
-				planceCaptureWidth = gPlaneDPCapture->getWidth();
-				planeCaptureHeight = gPlaneDPCapture->getHeight();
-
-				// Perform Capture OpenGL operations on MAIN thread
-				// initalize capture OpenGL (running on this thread)
-				gPlaneDPCapture->initializeGL();
-				RGBEasyRenderToTextureSetup(gPlaneDPCapture, planeDPCaptureRT);
-
-				// Perform frame capture on BACKGROUND thread
-				// start capture thread (which will intialize RGBEasy things)
+                std::function<void(void* data, unsigned long width, unsigned long height)> callback = uploadRGBEasyCapturePlaneData;
+                gPlaneDPCapture->setCaptureCallback(callback);
 				startPlaneDPCapture();
+
+                // TODO : Don't know dimensions in this stage...
+                planceCaptureWidth = gPlaneDPCapture->getWidth();
+                planeCaptureHeight = gPlaneDPCapture->getHeight();
 			}
 		}
 
 		planeImageFileNames.push_back("Single DP Capture");
-		planeCaptureTexId = planeDPCaptureRT.texture;
 	}
 
 	// do a high-frame rate fisheye capturing (if requested)
@@ -1704,6 +1773,9 @@ void myCleanUpFun()
     
     if(hiddenPlaneCaptureWindow)
         glfwDestroyWindow(hiddenPlaneCaptureWindow);
+
+    if (hiddenPlaneDPCaptureWindow)
+        glfwDestroyWindow(hiddenPlaneDPCaptureWindow);
 
 	if (hiddenTransferWindow)
 		glfwDestroyWindow(hiddenTransferWindow);

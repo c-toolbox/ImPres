@@ -95,8 +95,7 @@ sgct::SharedFloat fadingTime(2.0f);
 //Captures (FFmpegCapture and RGBEasyCapture)
 void uploadFFmpegCaptureData(uint8_t ** data, int width, int height);
 void parseArguments(int& argc, char**& argv);
-GLuint allocateFFmpegCaptureTexture();
-GLuint allocateRGBEasyCaptureTexture();
+GLuint allocateCaptureTexture(int w, int h);
 void ffmpegCaptureLoop();
 void startFFmpegCapture();
 void stopFFmpegCapture();
@@ -207,6 +206,9 @@ int main( int argc, char* argv[] )
 		stopFFmpegCapture();
 
 #ifdef RGBEASY_ENABLED
+    if (RGBEasyCaptureCPURunning.getVal())
+        stopRGBEasyCaptureCPU();
+
 	if (RGBEasyCaptureGPURunning.getVal())
 		stopRGBEasyCaptureGPU();
 #endif
@@ -214,6 +216,7 @@ int main( int argc, char* argv[] )
     // Clean up
     delete gFFmpegCapture;
 #ifdef RGBEASY_ENABLED
+    delete gRGBEasyCaptureCPU;
 	delete gRGBEasyCaptureGPU;
 #endif
     delete gEngine;
@@ -324,6 +327,9 @@ void stopFFmpegCapture()
 
 #ifdef RGBEASY_ENABLED
 void uploadRGBEasyCaptureCPUData(void* data, unsigned long width, unsigned long height) {
+    if (!RGBEasyCaptureCPURunning.getVal())
+        return;
+
     int dataSize = gRGBEasyCaptureCPU->getWidth() * gRGBEasyCaptureCPU->getHeight() * 3;
 
     if (!hiddenRGBEasyCaptureCPUWindow) {
@@ -339,7 +345,7 @@ void uploadRGBEasyCaptureCPUData(void* data, unsigned long width, unsigned long 
 
         if (!RGBEasyCaptureTexId)
         {
-            RGBEasyCaptureTexId = allocateRGBEasyCaptureTexture();
+            RGBEasyCaptureTexId = allocateCaptureTexture(width, height);
         }
 
         glGenBuffers(1, &RGBEasyCapturePBO);
@@ -546,7 +552,7 @@ void myInitOGLFun()
 		bool captureReady = gFFmpegCapture->init();
 		//allocate texture
 		if (captureReady) {
-			ffmpegCaptureTexId = allocateFFmpegCaptureTexture();
+			ffmpegCaptureTexId = allocateCaptureTexture(gFFmpegCapture->getWidth(), gFFmpegCapture->getHeight());
 		}
 
 		if (captureReady) {
@@ -580,11 +586,12 @@ void myInitOGLFun()
         sgct_core::SGCTNode * thisNode = sgct_core::ClusterManager::instance()->getThisNodePtr();
         if (thisNode->getAddress() == gRGBEasyCaptureCPU->getCaptureHost()) {
             if (gRGBEasyCaptureCPU->initialize()) {
+                std::function<void(void* data, unsigned long width, unsigned long height)> callback = uploadRGBEasyCaptureCPUData;
+                gRGBEasyCaptureCPU->setCaptureCallback(callback);
+
                 startRGBEasyCaptureCPU();
             }
         }
-        std::function<void(void* data, unsigned long width, unsigned long height)> callback = uploadRGBEasyCaptureCPUData;
-        gRGBEasyCaptureCPU->setCaptureCallback(callback);
     }
 #endif
 
@@ -747,11 +754,8 @@ void parseArguments(int& argc, char**& argv)
     }
 }
 
-GLuint allocateFFmpegCaptureTexture()
+GLuint allocateCaptureTexture(int w, int h)
 {
-    int w = gFFmpegCapture->getWidth();
-    int h = gFFmpegCapture->getHeight();
-
     if (w * h <= 0)
     {
         sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Invalid texture size (%dx%d)!\n", w, h);
@@ -774,35 +778,6 @@ GLuint allocateFFmpegCaptureTexture()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     return texId;
-}
-
-GLuint allocateRGBEasyCaptureTexture()
-{
-    int w = gRGBEasyCaptureCPU->getWidth();
-    int h = gRGBEasyCaptureCPU->getHeight();
-
-    if (w * h <= 0)
-    {
-        sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_ERROR, "Invalid texture size (%dx%d)!\n", w, h);
-        return 0;
-    }
-	sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Capture texture size (%dx%d)!\n", w, h);
-
-	GLuint texId;
-    glGenTextures(1, &texId);
-    glBindTexture(GL_TEXTURE_2D, texId);
-
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, w, h);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-	return texId;
 }
 
 void uploadFFmpegCaptureData(uint8_t ** data, int width, int height)

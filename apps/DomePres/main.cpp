@@ -267,6 +267,8 @@ void planeCaptureLoop();
 void calculateStats();
 void startPlaneCapture();
 void stopPlaneCapture();
+void updateCapturePlaneTexIDs();
+void allocateCapturePlanes();
 void createPlanes();
 
 struct RT
@@ -290,6 +292,10 @@ void startFisheyeCapture();
 void stopFisheyeCapture();
 void RGBEasyCaptureGPUPollAndDraw(RGBEasyCaptureGPU* capture, RT& captureRT);
 void RGBEasyRenderToTextureSetup(RGBEasyCaptureGPU* capture, RT& captureRT);
+#endif
+
+#ifdef ZXING_ENABLED
+bool checkQRoperations(uint8_t** data, int width, int height, bool flipped);
 #endif
 
 GLint Matrix_Loc = -1;
@@ -1018,6 +1024,10 @@ void uploadRGBEasyCapturePlaneData(void* data, unsigned long width, unsigned lon
             planceCaptureWidth = width;
             planeCaptureHeight = height;
             planeCaptureTexId = allocateCaptureTexture();
+
+            //update capture textures
+            updateCapturePlaneTexIDs();
+
             planeReCreate.setVal(true);
         }
 
@@ -1029,35 +1039,47 @@ void uploadRGBEasyCapturePlaneData(void* data, unsigned long width, unsigned lon
     else
         glfwMakeContextCurrent(hiddenPlaneDPCaptureWindow);
 
-    void* GPU_ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
-    if (GPU_ptr)
+    if (planeCaptureTexId)
     {
+#ifdef ZXING_ENABLED
+        uint8_t* dataUC = (uint8_t*)data;
+        if (checkQRoperations(&dataUC, width, height, !flipFrame)) {
+#endif
 
-        if (flipFrame)
+        void* GPU_ptr = glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY);
+        if (GPU_ptr)
         {
-            int dataOffset = 0;
-            int stride = width * 3; //Assuming BGR24
-            unsigned char* GPU_ptrUC = static_cast<unsigned char*>(GPU_ptr);
-            unsigned char* dataUC = static_cast<unsigned char*>(data);
-            for (int row = height - 1; row > -1; row--)
+
+            if (flipFrame)
             {
-                memcpy(GPU_ptrUC + dataOffset, dataUC + row * stride, stride);
-                dataOffset += stride;
+                int dataOffset = 0;
+                int stride = width * 3; //Assuming BGR24
+                unsigned char* GPU_ptrUC = static_cast<unsigned char*>(GPU_ptr);
+                unsigned char* dataUC = static_cast<unsigned char*>(data);
+                for (int row = height - 1; row > -1; row--)
+                {
+                    memcpy(GPU_ptrUC + dataOffset, dataUC + row * stride, stride);
+                    dataOffset += stride;
+                }
             }
-        }
-        else
-        {
+            else
+            {
             
-            memcpy(GPU_ptr, data, dataSize);
+                memcpy(GPU_ptr, data, dataSize);
+            }
+
+            glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
+
+            //Assuming BGR24
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
         }
 
-        glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
-
-        //Assuming BGR24
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGR, GL_UNSIGNED_BYTE, 0);
+#ifdef ZXING_ENABLED
+        }
+#endif
     }
 
     glfwMakeContextCurrent(NULL); //detach context
@@ -1237,6 +1259,140 @@ void RGBEasyRenderToTextureSetup(RGBEasyCaptureGPU* capture, RT& captureRT) {
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 #endif
+
+#ifdef ZXING_ENABLED
+bool checkQRoperations(uint8_t** data, int width, int height, bool flipped)
+{
+    // If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
+    std::vector<std::string> decodedResults;
+    if (planeCapturePresMode.getVal())
+        decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height, flipped));
+
+    if (!decodedResults.empty()) {
+        //Save only unique operations
+        for each(std::string decodedResult in decodedResults) {
+            if (std::find(operationsQueue.begin(), operationsQueue.end(), decodedResult) == operationsQueue.end()) {
+                //Operation not in queue, add it
+                sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Decode %i characters, with resulting string: %s\n", decodedResult.size(), decodedResult.c_str());
+                operationsQueue.push_back(decodedResult.c_str());
+            }
+        }
+        return false;
+    }
+    else {
+        std::vector<ContentPlaneLocalAttribs> pAL = planeAttributesLocal.getVal();
+        std::vector<ContentPlaneGlobalAttribs> pAG = planeAttributesGlobal.getVal();
+        if (!operationsQueue.empty()) {
+            // Now we can process them when decodedResults is empty
+            for (size_t i = 0; i < operationsQueue.size(); i++) {
+                sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Applying Operation: %s\n", operationsQueue[i].c_str());
+                std::vector<std::string> operation = split(operationsQueue[i].c_str(), ';');
+                if (operation.size() > 1) {
+                    int capturePlaneIdx = -1;
+                    for (int p = 0; p < captureContentPlanes.size(); p++) {
+                        if (pAL[p].name == operation[0]) {
+                            capturePlaneIdx = p;
+                            break;
+                        }
+                    }
+                    if (capturePlaneIdx >= 0) {
+                        for (int o = 1; o < operation.size(); o++) {
+                            if (operation[o] == "SetActive") {
+                                // Setting capturePlaneIdx as active capture plane
+                                pAL[capturePlaneIdx].previouslyVisible = false;
+                                pAL[capturePlaneIdx].freeze = false;
+                                pAG[capturePlaneIdx].planeTexId = 0;
+
+                                //Freezing other planes which are not already frozen
+                                for (int p = 0; p < captureContentPlanes.size(); p++) {
+                                    if (p != capturePlaneIdx && !pAL[p].freeze) {
+                                        pAL[p].freeze = true;
+                                        glCopyImageSubData(planeCaptureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[p], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+                                        glFlush();
+                                    }
+                                }
+
+                                // Setting capturePlaneIdx as active capture plane
+                                pAL[capturePlaneIdx].currentlyVisible = true;
+                            }
+                        }
+                    }
+                    else if (operation[0] == "AllCaptures") {
+                        if (operation[1] == "Clear") {
+                            //Making all planes fade out
+                            for (int p = 0; p < captureContentPlanes.size(); p++) {
+                                //Need to freeze all planes
+                                if (!pAL[p].freeze) {
+                                    pAL[p].freeze = true;
+                                    glCopyImageSubData(planeCaptureTexId, GL_TEXTURE_2D, 0, 0, 0, 0, planeTexOwnedIds[p], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1);
+                                    glFlush();
+                                }
+                                pAL[p].currentlyVisible = false;
+                            }
+                        }
+                    }
+                    else {
+                        sgct::MessageHandler::instance()->print(sgct::MessageHandler::NOTIFY_INFO, "Could not find plane named: %s\n", operation[0].c_str());
+                    }
+                }
+            }
+            planeAttributesLocal.setVal(pAL);
+            operationsQueue.clear();
+        }
+        return true;
+    }
+}
+#endif
+
+void updateCapturePlaneTexIDs() {
+    size_t planesTexCount = planeTexOwnedIds.size();
+    planeTexOwnedIds.clear();
+
+    for (size_t i = 0; i < planesTexCount; i++)
+        planeTexOwnedIds.push_back(allocateCaptureTexture());
+}
+
+void allocateCapturePlanes() {
+    //define capture planes
+    imPlanes.push_back("FrontCapture");
+    ContentPlane frontCapture = ContentPlane("FrontCapture", imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneDistance, true);
+    planeTexOwnedIds.push_back(allocateCaptureTexture());
+    planeAttributesGlobal.addVal(frontCapture.getGlobal());
+    planeAttributesLocal.addVal(frontCapture.getLocal());
+    captureContentPlanes.push_back(nullptr);
+
+    imPlanes.push_back("BackCapture");
+    ContentPlane backCapture = ContentPlane("BackCapture", 1.8f, -155.f, 20.f, imPlaneRoll, imPlaneDistance, false);
+    planeTexOwnedIds.push_back(allocateCaptureTexture());
+    planeAttributesGlobal.addVal(backCapture.getGlobal());
+    planeAttributesLocal.addVal(backCapture.getLocal());
+    captureContentPlanes.push_back(nullptr);
+
+    imPlanes.push_back("LeftCapture");
+    ContentPlane leftCapture = ContentPlane("LeftCapture", 2.865f, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
+    planeTexOwnedIds.push_back(allocateCaptureTexture());
+    planeAttributesGlobal.addVal(leftCapture.getGlobal());
+    planeAttributesLocal.addVal(leftCapture.getLocal());
+    captureContentPlanes.push_back(nullptr);
+
+    imPlanes.push_back("RightCapture");
+    ContentPlane rightCapture = ContentPlane("RightCapture", 2.865f, 75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
+    planeTexOwnedIds.push_back(allocateCaptureTexture());
+    planeAttributesGlobal.addVal(rightCapture.getGlobal());
+    planeAttributesLocal.addVal(rightCapture.getLocal());
+    captureContentPlanes.push_back(nullptr);
+
+    imPlanes.push_back("TopCapture");
+    ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135f, imPlaneRoll, imPlaneDistance, false);
+    planeTexOwnedIds.push_back(allocateCaptureTexture());
+    planeAttributesGlobal.addVal(topCapture.getGlobal());
+    planeAttributesLocal.addVal(topCapture.getLocal());
+    captureContentPlanes.push_back(nullptr);
+
+    //define default content plane
+    //imPlanes.push_back("Content 1");
+    //planeAttributes.addVal(ContentPlane(1.6f, 0.f, 95.0f, 0.f));
+}
 
 void createPlanes() {
 	//Capture planes
@@ -1501,45 +1657,8 @@ void myInitOGLFun()
     if (gEngine->isMaster())
         loadThread = new (std::nothrow) std::thread(threadWorker);
 
-	//define capture planes
-	imPlanes.push_back("FrontCapture");
-	ContentPlane frontCapture = ContentPlane("FrontCapture", imPlaneHeight, imPlaneAzimuth, imPlaneElevation, imPlaneRoll, imPlaneDistance, true);
-	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributesGlobal.addVal(frontCapture.getGlobal());
-	planeAttributesLocal.addVal(frontCapture.getLocal());
-	captureContentPlanes.push_back(nullptr);
-
-	imPlanes.push_back("BackCapture");
-	ContentPlane backCapture = ContentPlane("BackCapture", 1.8f, -155.f, 20.f, imPlaneRoll, imPlaneDistance, false);
-	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributesGlobal.addVal(backCapture.getGlobal());
-	planeAttributesLocal.addVal(backCapture.getLocal());
-	captureContentPlanes.push_back(nullptr);
-
-	imPlanes.push_back("LeftCapture");
-	ContentPlane leftCapture = ContentPlane("LeftCapture", 2.865f, -75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
-	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributesGlobal.addVal(leftCapture.getGlobal());
-	planeAttributesLocal.addVal(leftCapture.getLocal());
-	captureContentPlanes.push_back(nullptr);
-
-	imPlanes.push_back("RightCapture");
-	ContentPlane rightCapture = ContentPlane("RightCapture", 2.865f, 75.135f, 26.486f, imPlaneRoll, imPlaneDistance, false);
-	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributesGlobal.addVal(rightCapture.getGlobal());
-	planeAttributesLocal.addVal(rightCapture.getLocal());
-	captureContentPlanes.push_back(nullptr);
-
-	imPlanes.push_back("TopCapture");
-	ContentPlane topCapture = ContentPlane("TopCapture", imPlaneHeight, 0.f, 75.135f, imPlaneRoll, imPlaneDistance, false);
-	planeTexOwnedIds.push_back(allocateCaptureTexture());
-	planeAttributesGlobal.addVal(topCapture.getGlobal());
-	planeAttributesLocal.addVal(topCapture.getLocal());
-	captureContentPlanes.push_back(nullptr);
-
-	//define default content plane
-	//imPlanes.push_back("Content 1");
-	//planeAttributes.addVal(ContentPlane(1.6f, 0.f, 95.0f, 0.f));
+    //define capture planes
+    allocateCapturePlanes();
 
     //create plane
 	createPlanes();
@@ -2317,7 +2436,8 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
     if (planeCaptureTexId)
     {
 #ifdef ZXING_ENABLED
-		// If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
+        if(checkQRoperations(data, width, height, flipFrame)) {
+		/*// If result is not empty, we have to interpret the message to decide it the plane should lock the capture to the previous frame or update it.
 		std::vector<std::string> decodedResults;
 		if(planeCapturePresMode.getVal())
 			decodedResults = QRCodeInterpreter::decodeImageMulti(BGR24LuminanceSource::create(data, width, height, flipFrame));
@@ -2389,7 +2509,7 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 						}
 					}
 				}
-			}
+			}*/
 #endif
 			unsigned char * GPU_ptr = reinterpret_cast<unsigned char*>(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY));
 			if (GPU_ptr)
@@ -2432,10 +2552,10 @@ void uploadCaptureData(uint8_t ** data, int width, int height)
 				}
 			}
 #ifdef ZXING_ENABLED
-			if (!operationsQueue.empty()) {
+			/*if (!operationsQueue.empty()) {
 				planeAttributesLocal.setVal(pAL);
 				operationsQueue.clear();
-			}
+			}*/
 		}
 #endif
 

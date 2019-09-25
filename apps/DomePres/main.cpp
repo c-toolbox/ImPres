@@ -329,7 +329,6 @@ bool fulldomeMode = false;
 bool planeDPCaptureRequested = false;
 bool fisheyeCaptureRequested = false;
 ContentPlaneLocalAttribs fullDomeAttribs = ContentPlaneLocalAttribs("fullDome");
-;
 glm::vec2 planeScaling(1.0f, 1.0f);
 glm::vec2 planeOffset(0.0f, 0.0f);
 
@@ -650,7 +649,11 @@ void myDraw3DFun()
     //Set up backface culling
     glCullFace(GL_BACK);
 
-    if (domeTexIndex.getVal() != -1 && !fulldomeMode)// && texIds.getSize() > domeTexIndex.getVal())
+    fullDomeAttribs.currentlyVisible = fulldomeMode;
+    float fulldomeOpacity = getContentPlaneOpacity(-1);
+
+    if (domeTexIndex.getVal() != -1
+        && fulldomeOpacity <= 0.f)  // && texIds.getSize() > domeTexIndex.getVal())
     {
 		float mix = -1;
 		if (previousDomeTexIndex != domeTexIndex.getVal() && domeBlendStartTime == -1.0) {
@@ -795,14 +798,13 @@ void myDraw3DFun()
 		}
 	}
 
-    if (fulldomeMode) {
+    if (fulldomeOpacity > 0.f) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, planeCaptureTexId);
         glm::vec2 texSize = glm::vec2(static_cast<float>(planceCaptureWidth),
                                         static_cast<float>(planeCaptureHeight));
 
-        planeOpacity = getContentPlaneOpacity(-1);
-        glUniform1f(Opacity_L, planeOpacity);
+        glUniform1f(Opacity_L, fulldomeOpacity);
 
         // TextureCut 2 equals showing only the middle square of a capturing a
         // widescreen input
@@ -1624,6 +1626,9 @@ void myInitOGLFun()
 		sgct::SGCTOpenVR::initialize(gEngine->getNearClippingPlane(), gEngine->getFarClippingPlane());
 	}
 #endif
+
+    fullDomeAttribs.currentlyVisible = false;
+    fullDomeAttribs.previouslyVisible = false;
 
 	// do directshow if we don't use the better RGBEasy solution
 	if (!planeDPCaptureRequested) {
